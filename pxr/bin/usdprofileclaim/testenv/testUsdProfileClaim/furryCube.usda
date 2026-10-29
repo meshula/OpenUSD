@@ -1,0 +1,13 @@
+#usda 1.0
+(
+    "Furry Cube test fixture for usdprofileclaim."
+    defaultPrim = "FurryCube"
+)
+
+def Cube "FurryCube" (
+    prepend apiSchemas = ["ColorSpaceAPI"]
+)
+{
+    double size = 2
+    uniform token colorSpace = "lin_rec709"
+}

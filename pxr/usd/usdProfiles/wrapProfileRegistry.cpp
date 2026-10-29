@@ -89,6 +89,30 @@ _TestLoadFromFile(const std::string& filePath)
     return make_tuple(ok, pyErrors);
 }
 
+// Python helpers for functions that take optional TypeCapabilityCache*
+std::set<TfToken>
+_GetTypeImpliedCapabilities(const TfType& type)
+{
+    return UsdProfileRegistry::GetTypeImpliedCapabilities(type);
+}
+
+std::set<TfToken>
+_GetSchemaImpliedCapabilities(const TfType& schemaType)
+{
+    return UsdProfileRegistry::GetSchemaImpliedCapabilities(schemaType);
+}
+
+std::set<TfToken>
+_GetFileFormatImpliedCapabilities(const TfType& formatType)
+{
+    return UsdProfileRegistry::GetFileFormatImpliedCapabilities(formatType);
+}
+
+std::set<TfToken>
+_GetPrimImpliedCapabilities(const UsdPrim& prim)
+{
+    return UsdProfileRegistry::GetPrimImpliedCapabilities(prim);
+}
 
 } // anonymous namespace
 
@@ -158,17 +182,29 @@ void wrapUsdProfileRegistry()
             .def("GetCapabilityStyles",       &_GetCapabilityStyles)
             .staticmethod("GetCapabilityStyles")
 
+            .def("GetTypeImpliedCapabilities",
+                 &_GetTypeImpliedCapabilities,
+                 (arg("type")),
+                 return_value_policy<TfPySequenceToSet>())
+            .staticmethod("GetTypeImpliedCapabilities")
+
             .def("GetSchemaImpliedCapabilities",
-                 &This::GetSchemaImpliedCapabilities,
+                 &_GetSchemaImpliedCapabilities,
                  (arg("schemaType")),
                  return_value_policy<TfPySequenceToSet>())
             .staticmethod("GetSchemaImpliedCapabilities")
 
             .def("GetFileFormatImpliedCapabilities",
-                 &This::GetFileFormatImpliedCapabilities,
+                 &_GetFileFormatImpliedCapabilities,
                  (arg("formatType")),
                  return_value_policy<TfPySequenceToSet>())
             .staticmethod("GetFileFormatImpliedCapabilities")
+
+            .def("GetPrimImpliedCapabilities",
+                 &_GetPrimImpliedCapabilities,
+                 (arg("prim")),
+                 return_value_policy<TfPySequenceToSet>())
+            .staticmethod("GetPrimImpliedCapabilities")
 
             .def("_TestClear",                &Usd_ProfilesRegistryTestClear)
             .staticmethod("_TestClear")
@@ -181,12 +217,12 @@ void wrapUsdProfileRegistry()
         // Nested types: QueryStatus and CapabilityResult are scoped under
         // ProfileRegistry in Python (UsdProfiles.ProfileRegistry.QueryStatus).
         enum_<QS>("QueryStatus")
-            .value("NoPath",              QS::NoPath)
-            .value("ValidPath",           QS::ValidPath)
-            .value("Deprecated",          QS::Deprecated)
+            .value("NoPath",               QS::NoPath)
+            .value("ValidPath",            QS::ValidPath)
+            .value("Deprecated",           QS::Deprecated)
             .value("DeprecationConflict", QS::DeprecationConflict)
-            .value("Excepted",            QS::Excepted)
-            .value("CycleFound",          QS::CycleFound)
+            .value("Excepted",             QS::Excepted)
+            .value("CycleFound",           QS::CycleFound)
             ;
 
         class_<CR>("CapabilityResult", no_init)

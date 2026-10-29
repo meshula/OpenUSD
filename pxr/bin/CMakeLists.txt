@@ -1,6 +1,8 @@
 set(DIRS
     usdauthors
     usdfixbrokenpixarschemas
+    usdprofileclaim
+    usdprofilegraph
     usdzip
 )
 

@@ -32,19 +32,7 @@ GfColorSpace::GfColorSpace(const TfToken& name)
 {
     _data->colorSpace = NcGetNamedColorSpace(name.GetString().c_str());
     if (!_data->colorSpace) {
-        // A color space constructed with a name that is not a registered name
-        // should function like an identity color space; the only reason to do
-        // this is to have a sentinel color space meant for comparison and
-        // hashing.
-        NcColorSpaceM33Descriptor identity;
-        identity.shortName = name.GetString().c_str();
-        identity.descriptiveName = identity.shortName;
-        identity.rgbToXYZ = { 1.0f, 0.0f, 0.0f,
-                              0.0f, 1.0f, 0.0f,
-                              0.0f, 0.0f, 1.0f };
-        identity.gamma = 1.0f;
-        identity.linearBias = 0.0f;
-        _data->colorSpace = NcCreateColorSpaceM33(&identity, nullptr);
+        _data->colorSpace = NcCreateDataColorSpace(name.GetString().c_str());
     }
 }
 

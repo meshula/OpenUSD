@@ -1462,6 +1462,15 @@ def InstallOpenImageIO(context, force, buildArgs):
                      '-DUSE_PYTHON=OFF',
                      '-DSTOP_ON_WARNING=OFF']
 
+        # OpenImageIO unconditionally depends on OpenColorIO. Point OIIO at our
+        # build explicitly.
+        extraArgs.append('-DOpenColorIO_ROOT="{instDir}"'
+                         .format(instDir=context.instDir))
+
+        # OpenImageIO expects OpenJPH >= 2.2, unfortunately many system installs
+        # have an older one, so we need to suppress it to avoid a build failure.
+        extraArgs.append('-DUSE_OpenJPEG=OFF')
+
         # OIIO's FindOpenEXR module circumvents CMake's normal library 
         # search order, which causes versions of OpenEXR installed in
         # /usr/local or other hard-coded locations in the module to
@@ -1515,12 +1524,31 @@ def InstallOpenColorIO(context, force, buildArgs):
 
         if MacOS():
             if apple_utils.IsTargetArm(context):
-                extraArgs.append('-DOCIO_USE_SSE=OFF')
+                # OCIO 2.4+ renames the SSE toggle to OCIO_USE_SIMD
+                # option, we are disabling SIMD activation until confirmation
+                # that there are no longer issues on Apple ARM targets.
+                extraArgs.append('-DOCIO_USE_SIMD=OFF')
 
         # Add on any user-specified extra arguments.
         extraArgs += buildArgs
 
-        RunCMake(context, force, extraArgs)
+        # OpenColorIO builds several of its dependencies (yaml-cpp, minizip-ng,
+        # pystring) via ExternalProject_Add. Some of those declare a
+        # cmake_minimum_required below 3.5, which CMake 4+ rejects. A top-level
+        # -DCMAKE_POLICY_VERSION_MINIMUM cache entry does not propagate into
+        # those nested sub-builds, so we set it in the environment instead,
+        # which works. Restore the previous value afterward to avoid leaking it
+        # into later dependency builds.
+        policyVar = "CMAKE_POLICY_VERSION_MINIMUM"
+        prevPolicy = os.environ.get(policyVar)
+        os.environ[policyVar] = "3.5"
+        try:
+            RunCMake(context, force, extraArgs)
+        finally:
+            if prevPolicy is None:
+                del os.environ[policyVar]
+            else:
+                os.environ[policyVar] = prevPolicy
 
 OPENCOLORIO = Dependency("OpenColorIO", InstallOpenColorIO,
                          "include/OpenColorIO/OpenColorABI.h")
@@ -2643,9 +2671,9 @@ if context.buildImaging:
     if context.enableOpenVDB:
         requiredDependencies += [ZLIB, TBB, BLOSC, BOOST, OPENVDB]
     
-    # When OCIO is required, we need to make sure it's built before OIIO, since
-    # OIIO is dependent on OCIO.
-    if context.buildOCIO:
+    # OpenColorIO must be built uncoditionally before OpenImageIO, since OIIO 
+    # depends non-optinally on OCIO.
+    if context.buildOCIO or context.buildOIIO:
         requiredDependencies += [ZLIB, OPENCOLORIO]
 
     if context.buildOIIO:

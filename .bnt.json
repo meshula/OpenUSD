@@ -1,0 +1,41 @@
+{
+  "buildDir": "/Users/nporcino/local/usd2609-2/build/OpenUSD",
+  "installDir": "",
+  "targets": [
+    "TestUsdProfilesPhonyFileFormat",
+    "_usdBakeMtlx",
+    "_usdProfiles",
+    "testUsdProfilesClaimsAPI",
+    "testUsdProfilesFileFormatImplication",
+    "testUsdProfilesProfiles",
+    "testUsdProfilesRegistry",
+    "testUsdProfilesSchemaImplication",
+    "usdBakeMaterialX_script",
+    "usdBakeMtlx",
+    "usdBakeMtlx_headerfiles",
+    "usdProfiles",
+    "usdProfiles_headerfiles",
+    "usdprofileclaim",
+    "usdprofilegraph"
+  ],
+  "tests": [
+    "testExecUsdAttributeComputations",
+    "testExecUsdAttributeExpressions",
+    "testExecUsdAttributeValueInput",
+    "testHioOpenEXR",
+    "testUsdProfileClaim",
+    "testUsdProfilesClaimsAPI",
+    "testUsdProfilesClaimsAPIPy",
+    "testUsdProfilesFileFormatImplication",
+    "testUsdProfilesFileFormatImplicationPy",
+    "testUsdProfilesProfiles",
+    "testUsdProfilesProfilesPy",
+    "testUsdProfilesRegistry",
+    "testUsdProfilesRegistryPy",
+    "testUsdProfilesSchemaImplication",
+    "testUsdProfilesSchemaImplicationPy"
+  ],
+  "fixRPath": false,
+  "verbose": false,
+  "jobs": 14
+}

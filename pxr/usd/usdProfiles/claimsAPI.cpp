@@ -131,11 +131,11 @@ PXR_NAMESPACE_OPEN_SCOPE
 // Dynamic leaf paths (e.g. per-capability) are built by _ExtendKey at runtime.
 TF_DEFINE_PRIVATE_TOKENS(
     _profilesTokens,
-    (profilesInfo)
+    (profiles)
     (capabilityUsages)
     (profileCompatibility)
-    ((capabilityUsagesKey,        "profilesInfo:capabilityUsages"))
-    ((profileCompatibilityKey,    "profilesInfo:profileCompatibility"))
+    ((capabilityUsagesKey,        "capabilityUsages"))
+    ((profileCompatibilityKey,    "profileCompatibility"))
 );
 
 // Append a dynamic leaf token to a static prefix.
@@ -157,7 +157,7 @@ UsdProfilesClaimsAPI::_GetProfilesInfoByKey(const TfToken &keyPath, T *val) cons
 {
     VtValue v;
     if (!GetPrim().GetMetadataByDictKey(
-            TfToken("customData"), keyPath, &v)) {
+            _profilesTokens->profiles, keyPath, &v)) {
         return false;
     }
     if (!v.IsHolding<T>()) {
@@ -175,20 +175,14 @@ VtDictionary
 UsdProfilesClaimsAPI::GetProfilesInfo() const
 {
     VtDictionary result;
-    GetPrim().GetMetadataByDictKey(
-        TfToken("customData"),
-        _profilesTokens->profilesInfo,
-        &result);
+    GetPrim().GetMetadata(_profilesTokens->profiles, &result);
     return result;
 }
 
 void
 UsdProfilesClaimsAPI::SetProfilesInfo(const VtDictionary &info) const
 {
-    GetPrim().SetMetadataByDictKey(
-        TfToken("customData"),
-        _profilesTokens->profilesInfo,
-        info);
+    GetPrim().SetMetadata(_profilesTokens->profiles, info);
 }
 
 // ---------------------------------------------------------------------- //
@@ -207,7 +201,7 @@ void
 UsdProfilesClaimsAPI::SetCapabilityUsages(const VtDictionary &usages) const
 {
     GetPrim().SetMetadataByDictKey(
-        TfToken("customData"),
+        _profilesTokens->profiles,
         _profilesTokens->capabilityUsagesKey,
         usages);
 }
@@ -217,7 +211,7 @@ UsdProfilesClaimsAPI::SetCapabilityUsage(const TfToken &capability,
                                    const TfToken &degradationClass) const
 {
     GetPrim().SetMetadataByDictKey(
-        TfToken("customData"),
+        _profilesTokens->profiles,
         _ExtendKey(_profilesTokens->capabilityUsagesKey, capability),
         VtValue(degradationClass));
 }
@@ -255,7 +249,7 @@ void
 UsdProfilesClaimsAPI::SetProfileCompatible(const TfToken &profile) const
 {
     GetPrim().SetMetadataByDictKey(
-        TfToken("customData"),
+        _profilesTokens->profiles,
         _ExtendKey(_profilesTokens->profileCompatibilityKey, profile),
         VtValue(VtArray<TfToken>()));
 }
@@ -266,7 +260,7 @@ UsdProfilesClaimsAPI::SetProfileCompatibleWithExceptions(
     const VtArray<TfToken> &exceptions) const
 {
     GetPrim().SetMetadataByDictKey(
-        TfToken("customData"),
+        _profilesTokens->profiles,
         _ExtendKey(_profilesTokens->profileCompatibilityKey, profile),
         VtValue(exceptions));
 }
@@ -284,7 +278,7 @@ void
 UsdProfilesClaimsAPI::ClearProfileCompatibility(const TfToken &profile) const
 {
     GetPrim().ClearMetadataByDictKey(
-        TfToken("customData"),
+        _profilesTokens->profiles,
         _ExtendKey(_profilesTokens->profileCompatibilityKey, profile));
 }
 
@@ -299,50 +293,55 @@ static std::set<TfToken>
 _GatherImpliedCapabilities(const UsdPrim& rootPrim)
 {
     std::set<TfToken> implied;
-
-    std::unordered_map<TfType, std::set<TfToken>, TfHash> typeCache;
-
-    for (const UsdPrim& prim : UsdPrimRange(rootPrim)) {
-        for (const TfToken& schemaToken : prim.GetAppliedSchemas()) {
-            // Drop instance suffix for multi-apply schemas.
-            const TfToken typeName =
-                UsdSchemaRegistry::GetTypeNameAndInstance(schemaToken).first;
-            const TfType schemaType = UsdSchemaRegistry::GetTypeFromName(typeName);
-            if (schemaType.IsUnknown()) {
-                continue;
-            }
-
-            auto cacheIt = typeCache.find(schemaType);
-            if (cacheIt == typeCache.end()) {
-                cacheIt = typeCache.emplace(
-                    schemaType,
-                    UsdProfileRegistry::GetSchemaImpliedCapabilities(schemaType)).first;
-            }
-            implied.insert(cacheIt->second.begin(), cacheIt->second.end());
-        }
+    if (!rootPrim) {
+        return implied;
     }
 
-    if (UsdStagePtr stage = rootPrim.GetStage()) {
-        std::unordered_set<TfType, TfHash> seenFormatTypes;
-        // skipping inputs from value clips.
-        for (const SdfLayerHandle& layer : stage->GetUsedLayers(false)) {
-            if (!layer || layer->IsAnonymous()) {
-                continue;
-            }
-            SdfFileFormatConstPtr fmt = layer->GetFileFormat();
-            if (!fmt) {
-                continue;
-            }
-            TfType formatType = TfType::Find(*fmt);
-            if (formatType.IsUnknown()
-                    || !seenFormatTypes.insert(formatType).second) {
-                continue;
-            }
+    UsdProfileRegistry::TypeCapabilityCache typeCache;
+    std::unordered_set<UsdPrim, TfHash> visitedPrototypes;
+    std::vector<UsdPrim> prototypeStack;
 
-            std::set<TfToken> fmtCaps =
-                UsdProfileRegistry::GetFileFormatImpliedCapabilities(formatType);
-            implied.insert(fmtCaps.begin(), fmtCaps.end());
+    // Helper to queue unique prototypes
+    auto queuePrototype = [&](const UsdPrim& proto) {
+        if (proto && visitedPrototypes.insert(proto).second) {
+            prototypeStack.push_back(proto);
         }
+    };
+
+    // Helper to inspect a prim and record implied capabilities
+    auto inspectPrim = [&](const UsdPrim& subtreeRoot) {
+        std::set<TfToken> primCaps =
+            UsdProfileRegistry::GetPrimImpliedCapabilities(subtreeRoot, nullptr);// @dp &typeCache);
+        implied.insert(primCaps.begin(), primCaps.end());
+    };
+
+    // Helper to traverse the main scene graph (rootPrim and all descendant
+    // un-instanced prims).
+    auto inspectPrimRange = [&](const UsdPrim& traversePrim) {
+        for (const UsdPrim& prim : UsdPrimRange(traversePrim)) {
+            inspectPrim(prim);
+
+            // If this prim is an instance root, record its prototype for traversal
+            if (prim.IsInstance()) {
+                if (UsdPrim proto = prim.GetPrototype()) {
+                    queuePrototype(proto);
+                }
+            }
+        }
+    };
+
+    // Edge case: If rootPrim itself is an instance or proxy, queue its prototype
+    if (rootPrim.IsInstance()) {
+        queuePrototype(rootPrim.GetPrototype());
+    }
+
+    inspectPrimRange(rootPrim);
+
+    // Walk only the prototypes referenced within rootPrim's subtree.
+    while (!prototypeStack.empty()) {
+        const UsdPrim protoRoot = prototypeStack.back();
+        prototypeStack.pop_back();
+        inspectPrimRange(protoRoot);
     }
 
     return implied;
@@ -383,7 +382,13 @@ UsdProfilesClaimsAPI::PopulateCapabilityUsages() const
     }
 
     VtDictionary merged = ComputeCapabilityUsages();
-    SetCapabilityUsages(merged);
+    if (!rootPrim.IsInstance()) {
+        SetCapabilityUsages(merged);
+    }
+    else {
+        TF_WARN("Cannot populate capability usages on an instance %s",
+                rootPrim.GetName().GetString().c_str());
+    }
     return merged;
 }
 

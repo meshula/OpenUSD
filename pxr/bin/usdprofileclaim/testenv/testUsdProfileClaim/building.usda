@@ -1,0 +1,29 @@
+#usda 1.0
+(
+    "Instanceable building asset for the procedural city fixture."
+    defaultPrim = "Building"
+)
+
+def Xform "Building"
+{
+    # ColorSpaceAPI applied inside the building prototype. When Building is
+    # referenced and made instanceable, UsdPrimRange's default predicate does
+    # not descend into the instance proxy, so this schema is not detected by
+    # capability introspection.
+    def Cube "Body" (
+        prepend apiSchemas = ["ColorSpaceAPI"]
+    )
+    {
+        double size = 1
+        uniform token colorSpace = "lin_rec709"
+    }
+
+    # A MaterialX material pulled in via reference. Its .mtlx layer exists in
+    # the stage's used-layers set, so usd.mtlx.fileformat is still inferred
+    # despite instancing.
+    def "Mat" (
+        prepend references = @./cityMaterial.mtlx@</MaterialX>
+    )
+    {
+    }
+}

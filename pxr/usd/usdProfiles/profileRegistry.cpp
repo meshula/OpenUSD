@@ -7,8 +7,10 @@
 
 #include "pxr/pxr.h"
 #include "pxr/usd/usdProfiles/api.h"
+#include "pxr/usd/usdProfiles/claimsAPI.h"
 #include "pxr/usd/usdProfiles/profileRegistry.h"
 #include "pxr/usd/usdProfiles/tokens.h"
+#include "pxr/usd/pcp/layerStack.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
 #include "pxr/base/js/json.h"
@@ -21,6 +23,8 @@
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/vt/value.h"
+#include "pxr/usd/sdf/fileFormat.h"
+#include "pxr/usd/usd/resolver.h"
 
 #include <cctype>
 #include <fstream>
@@ -199,10 +203,10 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateAcyclic(
         if (incomingDegree.find(id) == incomingDegree.end()) {
             incomingDegree[id] = 0;
         }
-        
+
         // record the predecessor count for this node
         incomingDegree[id] = static_cast<int>(edges.size());
-        
+
         for (const auto& edge : edges) {
             dependents[edge.name].push_back(id);
             // Ensure the predecessor is also tracked in incomingDegree
@@ -277,8 +281,8 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateEdges(
     return valid;
 }
 
-/// Validate that the graph has exactly one root (a node with no predecessors)
-/// and that it is named "usd". Skipped for empty graphs.
+/// Validate that the graph has exactly one root named "usd". Skipped
+/// for empty graphs.
 /// Returns true if valid (or empty), false otherwise.
 bool UsdProfileRegistry::_CapabilityGraph::ValidateRoot(
                     std::vector<std::string>* errors) const
@@ -295,8 +299,13 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateRoot(
     }
 
     static const TfToken usdRoot("usd");
-
-    if (roots.size() != 1) {
+    size_t rootsNamedUsd = 0;
+    for (auto root: roots) {
+        if (root == usdRoot) {
+            ++rootsNamedUsd;
+        }
+    }
+    if (rootsNamedUsd != 1) {
         if (errors) {
             std::vector<std::string> rootNames;
             for (const TfToken& r : roots) {
@@ -308,15 +317,6 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateRoot(
                 roots.size(),
                 roots.empty() ? "(none)" :
                     TfStringJoin(rootNames, ", ").c_str()));
-        }
-        return false;
-    }
-
-    if (roots[0] != usdRoot) {
-        if (errors) {
-            errors->push_back(TfStringPrintf(
-                "Graph root must be named 'usd', but found '%s'",
-                roots[0].GetText()));
         }
         return false;
     }
@@ -787,18 +787,119 @@ _GetTypeImpliedCapabilities(const TfType& type)
     return cache.emplace(type, std::move(result)).first->second;
 }
 
+// Shared implementation: gather impliesCapabilities from plugInfo for a type
+// and all its ancestor types (including the type itself). The plugInfo value
+// is a JSON string array (e.g. ["usd.core.colorspace"]); strengths live on
+// the consumer's claim, not on the implication. Results are cached per TfType
+// in a shared static cache behind cacheMutex.
 /* static */
 std::set<TfToken>
-UsdProfileRegistry::GetSchemaImpliedCapabilities(const TfType& schemaType)
+UsdProfileRegistry::GetTypeImpliedCapabilities(const TfType& type,
+                           UsdProfileRegistry::TypeCapabilityCache* typeCache)
 {
-    return _GetTypeImpliedCapabilities(schemaType);
+    if (type.IsUnknown()) {
+        return {};
+    }
+
+    // Check user-supplied cache if provided
+    if (typeCache) {
+        auto it = typeCache->find(type);
+        if (it != typeCache->end()) {
+            return it->second;
+        }
+    }
+
+    std::set<TfToken> result = _GetTypeImpliedCapabilities(type);
+
+    if (typeCache) {
+        typeCache->emplace(type, result);
+    }
+
+    return result;
 }
 
 /* static */
 std::set<TfToken>
-UsdProfileRegistry::GetFileFormatImpliedCapabilities(const TfType& formatType)
+UsdProfileRegistry::GetPrimImpliedCapabilities(const UsdPrim& prim,
+                     UsdProfileRegistry::PrimCapabilityCache* cache)
 {
-    return _GetTypeImpliedCapabilities(formatType);
+    if (!prim) {
+        return {};
+    }
+
+    std::set<TfToken> implied;
+    TypeCapabilityCache* typeCache = cache? &cache->typeCache : nullptr;
+    std::set<SdfLayerRefPtr> unfilteredLayers;
+    std::set<SdfLayerRefPtr> *layerCache = cache? &cache->layerCache : &unfilteredLayers;
+
+    //---------------------------------------------------------------
+    // Gather capabilities implied by this prim's Applied API Schemas
+    for (const TfToken& schemaToken : prim.GetAppliedSchemas()) {
+        // Drop instance suffix for multi-apply schemas
+        const TfToken typeName =
+            UsdSchemaRegistry::GetTypeNameAndInstance(schemaToken).first;
+        const TfType schemaType =
+            UsdSchemaRegistry::GetTypeFromName(typeName);
+        if (schemaType.IsUnknown()) {
+            continue;
+        }
+
+        std::set<TfToken> schemaCaps =
+            GetTypeImpliedCapabilities(schemaType, typeCache);
+        implied.insert(schemaCaps.begin(), schemaCaps.end());
+    }
+
+    //---------------------------------------------------------------
+    // Gather capabilities from concrete Prim Type plugInfo metadata
+    const TfToken primTypeName = prim.GetTypeName();
+    if (!primTypeName.IsEmpty()) {
+        const TfType primType =
+            UsdSchemaRegistry::GetTypeFromName(primTypeName);
+        if (!primType.IsUnknown()) {
+            std::set<TfToken> typeCaps =
+                GetTypeImpliedCapabilities(primType, typeCache);
+            implied.insert(typeCaps.begin(), typeCaps.end());
+        }
+    }
+
+    //---------------------------------------------------------------
+    // Gather explicitly authored metadata from the prim instance
+    UsdProfilesClaimsAPI claimsApi(prim);
+    VtDictionary authoredUsages = claimsApi.GetCapabilityUsages();
+    for (const auto& entry : authoredUsages) {
+        implied.insert(TfToken(entry.first));
+    }
+
+    //---------------------------------------------------------------
+    // Gather file formats implied by a prim's used layers.
+    // Use the unfiltered list of contributing arcs from
+    // non-inert nodes (ignoring relocates).
+    auto expandedPrimIndex = prim.ComputeExpandedPrimIndex();
+    for (const PcpNodeRef& node: expandedPrimIndex.GetNodeRange()) {
+        if (!node.IsInert() || node.GetArcType() == PcpArcTypeRelocate) {
+            const PcpLayerStackRefPtr& stack = node.GetLayerStack();
+            for (SdfLayerRefPtr const &layer: stack->GetLayers()) {
+                // If there was a layer, check it for file formats.
+                if (layer && !layer->IsAnonymous()) {
+                    if (auto [it, inserted] = layerCache->insert(layer); inserted) {
+                        SdfFileFormatConstPtr fmt = layer->GetFileFormat();
+                        if (fmt) {
+                            TfType formatType = TfType::Find(*fmt);
+                            if (!formatType.IsUnknown()) {
+                                if (auto [it, inserted] = typeCache->insert({formatType, {}}); inserted) {
+                                    std::set<TfToken> fmtCaps =
+                                        UsdProfileRegistry::GetFileFormatImpliedCapabilities(formatType);
+                                    implied.insert(fmtCaps.begin(), fmtCaps.end());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return implied;
 }
 
 /* static */
@@ -881,10 +982,10 @@ _GetStringFromDict(const JsObject &dict, const std::string &key,
 }
 
 bool
-UsdProfileRegistry::_LoadCapabilitiesFromProfileData(
+UsdProfileRegistry::MergeProfileData(
     const JsObject& profileData)
 {
-    // --- Merge styles and groups ---
+    // Merge styles and groups
 
     JsObject stylesData;
     if (_GetKey(profileData, _tokens->CapabilityStylesKey, &stylesData)) {
@@ -1001,7 +1102,7 @@ UsdProfileRegistry::_RegisterFromPlugins()
         }
 
         TfDiagnosticTrap trap;
-        _LoadCapabilitiesFromProfileData(profileData);
+        MergeProfileData(profileData);
 
         if (!trap.IsClean()) {
             std::vector<std::string> msgs;
@@ -1040,101 +1141,101 @@ public:
 
     static bool LoadFromFile(const std::string& filePath,
                              std::vector<std::string>* errors) {
-    // Open and parse the JSON file
-    std::ifstream ifs(filePath);
-    if (!ifs.is_open()) {
-        if (errors) {
-            errors->push_back(
-                TfStringPrintf("Failed to open file: %s", filePath.c_str()));
+        // Open and parse the JSON file
+        std::ifstream ifs(filePath);
+        if (!ifs.is_open()) {
+            if (errors) {
+                errors->push_back(
+                    TfStringPrintf("Failed to open file: %s", filePath.c_str()));
+            }
+            return false;
         }
-        return false;
-    }
 
-    JsParseError parseError;
-    JsValue root = JsParseStream(ifs, &parseError);
-    if (root.IsNull()) {
-        if (errors) {
-            errors->push_back(
-                TfStringPrintf("JSON parse error in '%s' at line %d col %d: %s",
-                    filePath.c_str(),
-                    parseError.line, parseError.column,
-                    parseError.reason.c_str()));
+        JsParseError parseError;
+        JsValue root = JsParseStream(ifs, &parseError);
+        if (root.IsNull()) {
+            if (errors) {
+                errors->push_back(
+                    TfStringPrintf("JSON parse error in '%s' at line %d col %d: %s",
+                        filePath.c_str(),
+                        parseError.line, parseError.column,
+                        parseError.reason.c_str()));
+            }
+            return false;
         }
-        return false;
-    }
 
-    if (!root.IsObject()) {
-        if (errors) {
-            errors->push_back(
-                TfStringPrintf("Expected JSON object at root of '%s'",
+        if (!root.IsObject()) {
+            if (errors) {
+                errors->push_back(
+                    TfStringPrintf("Expected JSON object at root of '%s'",
+                        filePath.c_str()));
+            }
+            return false;
+        }
+
+        const JsObject& rootObj = root.GetJsObject();
+
+        // Clear existing state
+        Clear();
+
+        // Unwrap canonical plugInfo.json format:
+        //   { "Plugins": [{ "Info": { "Profiles": {...} }, ... }, ...] }
+        // Iterate each plugin entry, extract its Info dict, and look for Profiles.
+        UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
+
+        auto pluginsIt = rootObj.find("Plugins");
+        if (pluginsIt == rootObj.end() || !pluginsIt->second.IsArray()) {
+            if (errors) {
+                errors->push_back(TfStringPrintf(
+                    "Expected 'Plugins' array at root of '%s'",
                     filePath.c_str()));
+            }
+            return false;
         }
-        return false;
-    }
 
-    const JsObject& rootObj = root.GetJsObject();
+        const JsArray& plugins = pluginsIt->second.GetJsArray();
+        for (const JsValue& pluginValue : plugins) {
+            if (!pluginValue.IsObject()) {
+                continue;
+            }
+            const JsObject& pluginObj = pluginValue.GetJsObject();
 
-    // Clear existing state
-    Clear();
+            // Extract "Info" dict (same level as GetMetadata() returns)
+            JsObject infoDict;
+            if (!_GetKey(pluginObj, "Info", &infoDict)) {
+                continue;
+            }
 
-    // Unwrap canonical plugInfo.json format:
-    //   { "Plugins": [{ "Info": { "Profiles": {...} }, ... }, ...] }
-    // Iterate each plugin entry, extract its Info dict, and look for Profiles.
-    UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
+            // Look for "Profiles" inside Info
+            JsObject profileData;
+            if (!_GetKey(infoDict, _tokens->PluginProfilesKey, &profileData)) {
+                continue;
+            }
 
-    auto pluginsIt = rootObj.find("Plugins");
-    if (pluginsIt == rootObj.end() || !pluginsIt->second.IsArray()) {
+            instance.MergeProfileData(profileData);
+        }
+
+        // Validate the graph
+        bool valid = true;
+
+        std::vector<std::string> validationErrors;
+        if (!instance._capabilityGraph->ValidateEdges(&validationErrors)) {
+            valid = false;
+        }
+        if (!instance._capabilityGraph->ValidateAcyclic(&validationErrors)) {
+            valid = false;
+        }
+        if (!instance._capabilityGraph->ValidateRoot(&validationErrors)) {
+            valid = false;
+        }
+
         if (errors) {
-            errors->push_back(TfStringPrintf(
-                "Expected 'Plugins' array at root of '%s'",
-                filePath.c_str()));
-        }
-        return false;
-    }
-
-    const JsArray& plugins = pluginsIt->second.GetJsArray();
-    for (const JsValue& pluginValue : plugins) {
-        if (!pluginValue.IsObject()) {
-            continue;
-        }
-        const JsObject& pluginObj = pluginValue.GetJsObject();
-
-        // Extract "Info" dict (same level as GetMetadata() returns)
-        JsObject infoDict;
-        if (!_GetKey(pluginObj, "Info", &infoDict)) {
-            continue;
+            errors->insert(errors->end(),
+                validationErrors.begin(), validationErrors.end());
         }
 
-        // Look for "Profiles" inside Info
-        JsObject profileData;
-        if (!_GetKey(infoDict, _tokens->PluginProfilesKey, &profileData)) {
-            continue;
-        }
-
-        instance._LoadCapabilitiesFromProfileData(profileData);
+        return valid;
     }
-
-    // Validate the graph
-    bool valid = true;
-
-    std::vector<std::string> validationErrors;
-    if (!instance._capabilityGraph->ValidateEdges(&validationErrors)) {
-        valid = false;
-    }
-    if (!instance._capabilityGraph->ValidateAcyclic(&validationErrors)) {
-        valid = false;
-    }
-    if (!instance._capabilityGraph->ValidateRoot(&validationErrors)) {
-        valid = false;
-    }
-
-    if (errors) {
-        errors->insert(errors->end(),
-            validationErrors.begin(), validationErrors.end());
-    }
-
-    return valid;
-}
 };
 
 USDPROFILES_API void

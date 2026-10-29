@@ -65,6 +65,13 @@
                     }
                 }, 
                 "Types": {
+                    "UsdGeom": {
+                        "profiles": {
+                            "impliedCapabilities": {
+                                "usd.geom" : [ "usd" ]
+                            }
+                        }
+                    }, 
                     "UsdGeomBackPlateAPI": {
                         "alias": {
                             "UsdSchemaBase": "BackPlateAPI"
@@ -315,7 +322,12 @@
                         ], 
                         "implementsComputeExtent": true, 
                         "schemaIdentifier": "PointInstancer", 
-                        "schemaKind": "concreteTyped"
+                        "schemaKind": "concreteTyped",
+                        "profiles": {
+                            "impliedCapabilities": {
+                                "usd.geom.pointInstancer" : [ "usd.geom" ]
+                            }
+                        }
                     }, 
                     "UsdGeomPoints": {
                         "alias": {

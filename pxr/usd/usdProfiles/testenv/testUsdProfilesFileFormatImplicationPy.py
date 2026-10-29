@@ -7,7 +7,7 @@
 
 import os
 import unittest
-from pxr import Plug, Tf, Usd, UsdProfiles
+from pxr import Plug, Sdf, Tf, Usd, UsdProfiles
 
 PR = UsdProfiles.ProfileRegistry
 CA = UsdProfiles.ClaimsAPI
@@ -77,6 +77,12 @@ class TestFileFormatAggregation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _registerPhonyPlugin()
+        # Seed the phony layer with over "/Root" and store it on the class
+        # to keep a strong reference alive. Without it the layer is
+        # garbage-collected and reloaded from disk (empty) by each test.
+        phonyPath = os.path.join(os.getcwd(), "minimal.phony")
+        cls._phonyLayer = Sdf.Layer.FindOrOpen(phonyPath)
+        Sdf.PrimSpec(cls._phonyLayer, "Root", Sdf.SpecifierOver)
 
     def _phonyPath(self):
         return os.path.join(os.getcwd(), "minimal.phony")

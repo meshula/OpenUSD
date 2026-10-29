@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<?mentor version="1.0" ?>
+<testspecs>
+   <test name="testHioOpenEXR">
+      <owner>tools-gpu</owner>
+      <description>Test reading and writing OpenEXR</description>
+      <type>Unit</type>
+      <run command="testHioOpenEXR"/>
+   </test>
+ </testspecs>

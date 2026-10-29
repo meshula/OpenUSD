@@ -59,7 +59,8 @@ pxr_library(usdImagingGL
 )
 
 #
-# C++ tests - Only build on all platforms for now.
+# C++ tests - These are the only tests that build and
+# run all platforms at the moment.
 #
 set(TEST_LIBS
         "arch"
@@ -153,6 +154,14 @@ pxr_build_test(testUsdImagingGLTextureResync
         testenv/testUsdImagingGLTextureResync.cpp
 )
 
+# usdImagingGL tests require plugin mechanism to find different renderer
+# plugins, which we do not support for static build configurations due to
+# potential conflict in client applications linking against static build USD
+if (NOT BUILD_SHARED_LIBS)
+    message(STATUS "Skipping ${PXR_PACKAGE} tests on static build configuration")
+    return()
+endif()
+
 if (${PXR_HEADLESS_TEST_MODE})
     message(STATUS "Skipping ${PXR_PACKAGE} tests because PXR_HEADLESS_TEST_MODE is ON")
     return()
@@ -163,7 +172,7 @@ endif()
 # potential conflict in client applications linking against static build USD
 if (NOT BUILD_SHARED_LIBS)
     message(STATUS "Skipping ${PXR_PACKAGE} tests on static build configuration")
-    return()
+   return()
 endif()
 
 #
@@ -2514,6 +2523,52 @@ pxr_register_test(testUsdImagingGLWireframeOpacity
     TESTENV testenv/testUsdImagingGLWireframeOpacity
 )
 
+<<<<<<< HEAD
+=======
+pxr_register_test(testUsdImagingGLCards_anim
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdImagingGLBasicDrawing -offscreen -lighting -shading smooth -frameAll -stage testAnim.usda -times 1 2 -write testAnim.png"
+    IMAGE_DIFF_COMPARE
+        testAnim_001.png
+        testAnim_002.png
+    FAIL 0.02
+    FAIL_PERCENT 0.2
+    WARN 0.03
+    WARN_PERCENT 0.05
+    EXPECTED_RETURN_CODE 0
+    TESTENV testenv/testUsdImagingGLCards
+    ENV
+        USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX=false
+)
+
+pxr_register_test(testUsdImagingGLCards_bounds
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdImagingGLBasicDrawing -unloadedAsBounds -offscreen -lighting -shading smooth -frameAll -stage testUnloadedAsBounds.usda -write testUnloadedAsBounds.png"
+    IMAGE_DIFF_COMPARE
+        testUnloadedAsBounds.png
+    FAIL 0.01
+    FAIL_PERCENT 0.1
+    WARN 0.02
+    WARN_PERCENT 0.05
+    EXPECTED_RETURN_CODE 0
+    TESTENV testenv/testUsdImagingGLCards
+    ENV
+        USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX=false
+)
+
+pxr_register_test(testUsdImagingGLCards_basic
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdImagingGLBasicDrawing -offscreen -lighting -shading smooth -frameAll -stage testCardsBasic.usda -camera /MainCamera -write testCardsBasic.png"
+    IMAGE_DIFF_COMPARE
+        testCardsBasic.png
+    FAIL 0.1
+    FAIL_PERCENT 0.1
+    WARN 0.2
+    WARN_PERCENT 0.05
+    EXPECTED_RETURN_CODE 0
+    TESTENV testenv/testUsdImagingGLCards
+    ENV
+        USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX=false
+)
+
+>>>>>>> 8918746c6 (profiles usdMatlxBake wip)
 # XXX: Commenting out while failures are being investigated.
 # 
 # pxr_register_test(testUsdImagingGLCards_SceneIndex

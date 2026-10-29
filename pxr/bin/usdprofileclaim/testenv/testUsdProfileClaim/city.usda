@@ -1,0 +1,66 @@
+#usda 1.0
+(
+    "Procedural city fixture for usdprofileclaim --introspect."
+    "A 2x2 block grid of instanced buildings plus a non-instanced Ground."
+    defaultPrim = "City"
+)
+
+def Xform "City"
+{
+    # Non-instanced prim with ColorSpaceAPI applied directly, so
+    # usd.core.colorspace IS detected via introspection traversal.
+    def Xform "Ground" (
+        prepend apiSchemas = ["ColorSpaceAPI"]
+    )
+    {
+        uniform token colorSpace = "lin_rec709"
+    }
+
+    def Xform "Block1"
+    {
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def "B0" (
+            prepend references = @./building.usda@
+            instanceable = true
+        )
+        {
+            double3 xformOp:translate = (0, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def "B1" (
+            prepend references = @./building.usda@
+            instanceable = true
+        )
+        {
+            double3 xformOp:translate = (2, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "Block2"
+    {
+        double3 xformOp:translate = (0, 0, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def "B0" (
+            prepend references = @./building.usda@
+            instanceable = true
+        )
+        {
+            double3 xformOp:translate = (0, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def "B1" (
+            prepend references = @./building.usda@
+            instanceable = true
+        )
+        {
+            double3 xformOp:translate = (2, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+}

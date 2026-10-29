@@ -32,6 +32,7 @@ struct NcColorSpace {
     NcColorSpaceDescriptor desc;
     float K0, phi;
     NcM33f rgbToXYZ;
+
     // True for non-colorimetric placeholder spaces (such as Raw and Data).
     // Conversions to or from these spaces must leave RGB values unchanged
     // rather than being treated as a transform through the rgbToXYZ matrix.
@@ -81,7 +82,8 @@ static NcColorSpace _colorSpaces[] = {
          1.0,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         // extractPrimaries(cmx %*% AP0Mx)
@@ -93,7 +95,8 @@ static NcColorSpace _colorSpaces[] = {
          1.0,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Linear Rec.709 (sRGB)", "lin_rec709_scene",
@@ -104,7 +107,8 @@ static NcColorSpace _colorSpaces[] = {
          1.0,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Linear P3-D65", "lin_p3d65_scene",
@@ -115,7 +119,8 @@ static NcColorSpace _colorSpaces[] = {
          1.0,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Linear Rec.2020", "lin_rec2020_scene",
@@ -126,7 +131,8 @@ static NcColorSpace _colorSpaces[] = {
          1.0,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Linear AdobeRGB", "lin_adobergb_scene",
@@ -137,7 +143,8 @@ static NcColorSpace _colorSpaces[] = {
          1.0,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"CIE XYZ-D65 - Scene-referred", "lin_ciexyzd65_scene",
@@ -152,7 +159,8 @@ static NcColorSpace _colorSpaces[] = {
         // the CIE XYZ connection space. The usual NPM calculation from RP 177 is not
         // satisfactory since a D65 neutral should have an XYZ of [0.95046, 1., 1.08906]
         // rather than [1., 1., 1].
-        { 1.,0.,0., 0.,1.,0., 0.,0.,1. }
+        { 1.,0.,0., 0.,1.,0., 0.,0.,1. },
+        false
     },
     {
         {"sRGB Encoded Rec.709 (sRGB)", "srgb_rec709_scene",
@@ -163,7 +171,8 @@ static NcColorSpace _colorSpaces[] = {
          2.4,
          0.055},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Gamma 2.4 Encoded Rec.709", "g24_rec709_scene",
@@ -174,7 +183,8 @@ static NcColorSpace _colorSpaces[] = {
          2.4,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Gamma 2.2 Encoded Rec.709", "g22_rec709_scene",
@@ -185,7 +195,8 @@ static NcColorSpace _colorSpaces[] = {
          2.2,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Gamma 1.8 Encoded Rec.709", "g18_rec709_scene",
@@ -196,7 +207,8 @@ static NcColorSpace _colorSpaces[] = {
          1.8,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"sRGB Encoded AP1", "srgb_ap1_scene",
@@ -207,7 +219,8 @@ static NcColorSpace _colorSpaces[] = {
          2.4,
          0.055},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Gamma 2.2 Encoded AP1", "g22_ap1_scene",
@@ -218,7 +231,8 @@ static NcColorSpace _colorSpaces[] = {
          2.2,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"sRGB Encoded P3-D65", "srgb_p3d65_scene",
@@ -229,7 +243,8 @@ static NcColorSpace _colorSpaces[] = {
          2.4,
          0.055},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Gamma 2.2 Encoded AdobeRGB", "g22_adobergb_scene",
@@ -242,7 +257,8 @@ static NcColorSpace _colorSpaces[] = {
          563.f / 256.f,
          0.0},
         0, 0,
-        { 0,0,0, 0,0,0, 0,0,0 }
+        { 0,0,0, 0,0,0, 0,0,0 },
+        false
     },
     {
         {"Data", "data",
@@ -463,6 +479,36 @@ void NcInitColorSpaceLibrary(void) {
     for (size_t i = 0; i < sizeof(_colorSpaces) / sizeof(_colorSpaces[0]); i++) {
         _InitColorSpace(&_colorSpaces[i]);
     }
+}
+
+const NcColorSpace* NcCreateDataColorSpace(const char* name) {
+    if (!name)
+        return NULL;
+
+    NcColorSpace* cs = (NcColorSpace*) calloc(1, sizeof(*cs));
+    if (!cs)
+        return NULL;
+
+    cs->desc.descriptiveName = strdup(name);
+    cs->desc.shortName = strdup(name);
+
+    // Placeholder chromaticities matching built-in Data/Identity/Raw/Unknown spaces
+    cs->desc.redPrimary   = (NcChromaticity){ 1.0f, 0.0f };
+    cs->desc.greenPrimary = (NcChromaticity){ 0.0f, 1.0f };
+    cs->desc.bluePrimary  = (NcChromaticity){ 0.0f, 0.0f };
+    cs->desc.whitePoint   = (NcChromaticity){ 1.0f / 3.0f, 1.0f / 3.0f };
+    cs->desc.gamma        = 1.0f;
+    cs->desc.linearBias   = 0.0f;
+
+    // Identity transform matrix
+    cs->rgbToXYZ = (NcM33f){ 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+
+    // Mark as a non-colorimetric placeholder space
+    cs->isData = true;
+
+    // Initialize K0/phi and validate matrix setup
+    _InitColorSpace(cs);
+    return cs;
 }
 
 const NcColorSpace* NcCreateColorSpace(const NcColorSpaceDescriptor* csd) {

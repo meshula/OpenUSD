@@ -9,6 +9,7 @@
 
 #include "pxr/base/gf/half.h"
 #include "pxr/base/gf/math.h"
+#include "pxr/base/tf/errorMark.h"
 #include "pxr/base/trace/trace.h"
 
 #include "pxr/imaging/hgi/hgi.h"
@@ -435,6 +436,11 @@ HdStTextureUtils::GetAllMipImages(
                 filePath, subimage, mip, sourceColorSpace, suppressErrors);
 
         if (!image) {
+            if (mip > 0) {
+                // any non-mip-related errors would have been caught during
+                // creation of the HioImage object, so it's safe to clear here.
+                mark.Clear();
+            }
             break;
         }
 

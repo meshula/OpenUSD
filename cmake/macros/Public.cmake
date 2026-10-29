@@ -154,6 +154,7 @@ function(pxr_cpp_bin BIN_NAME)
     _get_install_dir(bin installDir)
     
     set(multiValueArgs
+        CPPFILES
         LIBRARIES
         INCLUDE_DIRS
     )
@@ -165,7 +166,21 @@ function(pxr_cpp_bin BIN_NAME)
         ${ARGN}
     )
 
-    add_executable(${BIN_NAME} ${BIN_NAME}.cpp)
+    set(binSources)
+    if(cb_CPPFILES)
+        foreach(src ${cb_CPPFILES})
+            # Append .cpp if no file extension was provided
+            get_filename_component(srcExt "${src}" EXT)
+            if(NOT srcExt)
+                set(src "${src}.cpp")
+            endif()
+            list(APPEND binSources "${src}")
+        endforeach()
+    else()
+        set(binSources "${BIN_NAME}.cpp")
+    endif()
+
+    add_executable(${BIN_NAME} ${binSources})
 
     # Turn PIC ON otherwise ArchGetAddressInfo() on Linux may yield
     # unexpected results.

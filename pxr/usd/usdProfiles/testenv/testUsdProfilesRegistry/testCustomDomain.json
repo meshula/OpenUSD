@@ -1,0 +1,85 @@
+{
+    "Profiles": {
+        "Capabilities": {
+            "techtree": {
+                "docstring": "Root capability for the tech tree.",
+                "name": "Tech Tree Root",
+                "style": "core",
+                "subgraph": "Foundation"
+            },
+            "techtree.space": {
+                "docstring": "Base node for spaceflight milestone systems.",
+                "name": "Space Program Base",
+                "predecessors": [
+                    "techtree"
+                ],
+                "style": "core",
+                "subgraph": "Foundation"
+            },
+            "techtree.space.sounding": {
+                "docstring": "Tier 1: Basic uncrewed atmospheric flight validating structural and motor foundations.",
+                "name": "Sounding Rocket",
+                "predecessors": [
+                    "techtree.space"
+                ],
+                "style": "propulsion",
+                "subgraph": "Atmospheric"
+            },
+            "techtree.space.orbital": {
+                "docstring": "Tier 2: Achievement of stable orbit via high-velocity engines and telemetry tracking.",
+                "name": "Orbital Flight",
+                "predecessors": [
+                    "techtree.space.sounding"
+                ],
+                "style": "propulsion",
+                "subgraph": "LowEarthOrbit"
+            },
+            "techtree.space.lifesupport": {
+                "docstring": "Tier 2: Engineering systems managing pressurized cabins, carbon scrubbing, and heat mitigation.",
+                "name": "Life Support Systems",
+                "predecessors": [
+                    "techtree.space.sounding"
+                ],
+                "style": "habitat",
+                "subgraph": "LowEarthOrbit"
+            },
+            "techtree.space.manned": {
+                "docstring": "Tier 3 (Diamond A): Sustaining human life safely inside a functional orbit and executing a safe atmospheric reentry.",
+                "name": "Manned Orbital Flight",
+                "predecessors": [
+                    "techtree.space.orbital",
+                    "techtree.space.lifesupport"
+                ],
+                "style": "mission",
+                "subgraph": "Operations"
+            },
+            "techtree.space.rendezvous": {
+                "docstring": "Tier 3 (Diamond B): Precision relative telemetry and active thruster handling to bring two separate craft together in space.",
+                "name": "Orbital Rendezvous",
+                "predecessors": [
+                    "techtree.space.orbital",
+                    "techtree.space.lifesupport"
+                ],
+                "style": "mission",
+                "subgraph": "Operations"
+            },
+            "techtree.space.lunar": {
+                "docstring": "Tier 4: Deep space execution covering interlunar transit, descent, and return staging.",
+                "name": "Moon Landing",
+                "predecessors": [
+                    "techtree.space.manned",
+                    "techtree.space.rendezvous"
+                ],
+                "style": "apex",
+                "subgraph": "DeepSpace"
+            }
+        },
+        "CapabilityStyles": {
+            "core": "fill:#1f2937,stroke:#4b5563,stroke-width:2px,color:#fff",
+            "propulsion": "fill:#7c2d12,stroke:#ea580c,stroke-width:2px,color:#fff",
+            "habitat": "fill:#064e3b,stroke:#16a34a,stroke-width:2px,color:#fff",
+            "mission": "fill:#1e3a8a,stroke:#2563eb,stroke-width:2px,color:#fff",
+            "apex": "fill:#581c87,stroke:#9333ea,stroke-width:2px,color:#fff"
+        }
+    }
+}

@@ -13,6 +13,7 @@
 #include "pxr/usd/usd/stage.h"
 #include "pxr/usd/sdf/layer.h"
 #include "pxr/usd/sdf/path.h"
+#include "pxr/usd/sdf/primSpec.h"
 #include "pxr/base/arch/systemInfo.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
@@ -117,6 +118,25 @@ TestFileFormatRegistryQuery()
 static void
 TestFileFormatAggregation(const std::string& phonyPath)
 {
+    // Seed the phony layer with over "/Root" and hold a strong reference
+    // for the duration of this function. Without the strong ref the layer
+    // is evicted when the setup stage is destroyed and subsequent test
+    // stages reload it from disk (empty again).
+    SdfLayerRefPtr phonyLayerRef;
+    {
+        UsdStageRefPtr setup = UsdStage::CreateInMemory();
+        setup->GetRootLayer()->GetSubLayerPaths().push_back(phonyPath);
+        for (const SdfLayerHandle& layer :
+                 setup->GetLayerStack(/*includeSessionLayers=*/false)) {
+            if (!layer->IsAnonymous()) {
+                phonyLayerRef = SdfLayer::FindOrOpen(layer->GetIdentifier());
+                break;
+            }
+        }
+        TF_AXIOM(phonyLayerRef);
+        SdfPrimSpec::New(phonyLayerRef, "Root", SdfSpecifierOver);
+    }
+
     // Stage with a .phony sublayer: capability appears at default "hard".
     {
         UsdStageRefPtr stage = UsdStage::CreateInMemory();

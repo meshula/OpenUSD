@@ -10,6 +10,7 @@
 /// \file usdProfiles/profileRegistry.h
 
 #include "pxr/usd/usdProfiles/api.h"
+#include "pxr/usd/usd/prim.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/tf/weakBase.h"
 #include "pxr/base/tf/singleton.h"
@@ -63,6 +64,10 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
         CycleFound,
     };
 
+    /// Shared helper: parse Capabilities, CapabilityStyles, and
+    /// Subgraphs from a "Profiles" JsObject into the graph.
+    USDPROFILES_API bool MergeProfileData(const JsObject& profileData);
+
     /// Test whether \p capability is known to the registry.
     USDPROFILES_API static bool HasCapability(const TfToken& capability);
 
@@ -76,8 +81,8 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
     /// keys \c name, \c docstring, \c style, and \c subgraph.
     /// Returns an empty dictionary if the capability is unknown.
     /// \sa HasCapability
-    USDPROFILES_API
-    static VtDictionary GetCapabilityMetadata(const TfToken& capability);
+    USDPROFILES_API static
+    VtDictionary GetCapabilityMetadata(const TfToken& capability);
 
     /// Per-capability query result.
     /// Ordered by capability token only; status is payload, not identity.
@@ -163,41 +168,57 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
     /// Returns \c NoPath (with an empty \p results) if \p perspective is
     /// unknown after resolution, or if \p required is empty.
     /// \sa HasCapability
-    USDPROFILES_API static QueryStatus CoversCapabilities(
-                                    const TfToken& perspective,
-                                    const std::set<TfToken>& required,
-                                    const std::set<TfToken>& excepted = {},
-                                    std::set<CapabilityResult>* results = nullptr);
+    USDPROFILES_API static
+    QueryStatus CoversCapabilities(
+                    const TfToken& perspective,
+                    const std::set<TfToken>& required,
+                    const std::set<TfToken>& excepted = {},
+                    std::set<CapabilityResult>* results = nullptr);
+
+    // When traversing scene subtrees with many prims, a cache is necessary
+    // to eliminate redundant data checks.
+    using TypeCapabilityCache =
+        std::unordered_map<TfType, std::set<TfToken>, TfHash>;
 
     /// Return the union of \c impliesCapabilities declared on \p schemaType
-    /// and all of its ancestor types, as a set of capability tokens.
+    /// and all of its ancestor types as a set of capability tokens.
     ///
-    /// Implications carry only the capability identity; the application's
-    /// usage strength (\c hard / \c soft / \c enhancement) is recorded by
-    /// the consumer on its \c UsdProfilesClaimsAPI, not at the schema
-    /// declaration site.
+    /// Implications carry the capability identity. Usage strength should
+    /// be (\c hard / \c soft / \c enhancement) should be recorded in claims
+    /// authored via \c UsdProfilesClaimsAPI.
     ///
-    /// Returns an empty set if \p schemaType is unknown or no ancestor
+    /// If \p typeCache is non-null, it is checked first and populated
+    /// on misses.
+    ///
+    /// Returns an empty set if the \p type is unknown or no ancestor
     /// declares any implied capabilities.
     ///
     /// Results are cached on first call per \c TfType.
-    USDPROFILES_API
-    static std::set<TfToken>
-    GetSchemaImpliedCapabilities(const TfType& schemaType);
+    USDPROFILES_API static
+    std::set<TfToken> GetTypeImpliedCapabilities(const TfType& type,
+                               TypeCapabilityCache* typeCache = nullptr);
 
-    /// Return the union of \c impliesCapabilities declared on \p formatType
-    /// and all of its ancestor types, using the same rules as
-    /// \c GetSchemaImpliedCapabilities. Intended for \c SdfFileFormat-derived
-    /// types: obtain the \c TfType via \c TfType::Find(*fileFormatPtr) or
-    /// \c TfType::FindByName.
-    ///
-    /// Returns an empty set if \p formatType is unknown or no ancestor
-    /// declares any implied capabilities.
-    ///
-    /// Results are cached on first call per \c TfType.
-    USDPROFILES_API
-    static std::set<TfToken>
-    GetFileFormatImpliedCapabilities(const TfType& formatType);
+    /// Deprecated
+    USDPROFILES_API static
+    std::set<TfToken> GetSchemaImpliedCapabilities(const TfType& schemaType,
+                                 TypeCapabilityCache* typeCache = nullptr) {
+        return GetTypeImpliedCapabilities(schemaType, typeCache);
+    }
+
+    /// Deprecated
+    USDPROFILES_API static
+    std::set<TfToken> GetFileFormatImpliedCapabilities(const TfType& formatType,
+                                     TypeCapabilityCache* typeCache = nullptr) {
+        return GetTypeImpliedCapabilities(formatType, typeCache);
+    }
+
+    struct PrimCapabilityCache {
+        TypeCapabilityCache typeCache;
+        std::set<SdfLayerRefPtr> layerCache;
+    };
+    USDPROFILES_API static
+    std::set<TfToken> GetPrimImpliedCapabilities(const UsdPrim& prim,
+                               PrimCapabilityCache* typeCache = nullptr);
 
     /// Return the set of all capabilities known to the registry.
     USDPROFILES_API static std::set<TfToken> GetAllCapabilities();
@@ -208,6 +229,7 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
 
     /// Extract just the capability tokens from a \c CapabilityResult set,
     /// discarding the per-entry status.
+    USDPROFILES_API
     static std::set<TfToken>
     CapabilityResultsToTokens(const std::set<CapabilityResult>& results) {
         std::set<TfToken> tokens;
@@ -242,17 +264,12 @@ private:
 
     UsdProfileRegistry();
     ~UsdProfileRegistry();
-    
+
     /// Return the single \c UsdProfileRegistry instance.
     static UsdProfileRegistry& GetInstance();
 
     void _RegisterFromPlugins();
 
-    /// Shared helper: parse Capabilities, CapabilityStyles, and
-    /// Subgraphs from a "Profiles" JsObject into the graph.
-    /// Called by both _RegisterFromPlugins and _TestLoadFromFile.
-    bool _LoadCapabilitiesFromProfileData(const JsObject& profileData);
-    
     class _CapabilityGraph;
     std::unique_ptr<_CapabilityGraph> _capabilityGraph;
 

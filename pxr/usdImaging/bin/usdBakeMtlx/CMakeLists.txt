@@ -9,7 +9,13 @@ if (NOT ${PXR_ENABLE_GL_SUPPORT} OR PXR_APPLE_EMBEDDED)
     return()
 endif()
 
-pxr_library(usdBakeMtlx
+# this tool has no public headers, so provide a dummy
+# target for the cmake linking script.
+if(NOT TARGET ${BIN_NAME}_headerfiles)
+    add_custom_target(${BIN_NAME}_headerfiles)
+endif()
+
+pxr_cpp_bin(usdBakeMtlx
     LIBRARIES
         tf
         sdr
@@ -22,23 +28,7 @@ pxr_library(usdBakeMtlx
         MaterialXFormat
         MaterialXRenderGlsl
 
-    PUBLIC_CLASSES
+    CPPFILES
         bakeMaterialX
-
-    PUBLIC_HEADERS
-        api.h
-
-    PYMODULE_CPPFILES
-        module.cpp
-        wrapBakeMaterialX.cpp
-
-    PYMODULE_FILES
-        __init__.py
-
-    DISABLE_PRECOMPILED_HEADERS
-)
-
-pxr_python_bin(usdBakeMaterialX
-    DEPENDENCIES
         usdBakeMtlx
 )

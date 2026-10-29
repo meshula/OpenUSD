@@ -156,6 +156,7 @@ found in documents naming color spaces.
 // Declare the public interface using the namespacing macro.
 #define NcColorSpaceEqual            NCCONCAT(NCNAMESPACE, ColorSpaceEqual)
 #define NcCreateColorSpace           NCCONCAT(NCNAMESPACE, CreateColorSpace)
+#define NcCreateDataColorSpace       NCCONCAT(NCNAMESPACE, CreateDataColorSpace)
 #define NcCreateColorSpaceM33        NCCONCAT(NCNAMESPACE, CreateColorSpaceM33)
 #define NcFreeColorSpace             NCCONCAT(NCNAMESPACE, FreeColorSpace)
 #define NcGetColorSpaceDescriptor    NCCONCAT(NCNAMESPACE, GetColorSpaceDescriptor)
@@ -212,6 +213,14 @@ NCAPI const NcColorSpace* NcGetNamedColorSpace(const char* name);
  * @return Pointer to the created color space object, or NULL if creation fails.
  */
 NCAPI const NcColorSpace* NcCreateColorSpace(const NcColorSpaceDescriptor* cs);
+
+/**
+ * Creates a color space object that treates the color space as data.
+ *
+ * @param name The name of the color space to create.
+ * @return Pointer to the created color space object, or NULL if creation fails.
+ */
+NCAPI const NcColorSpace* NcCreateDataColorSpace(const char* name);
 
 /**
  * Creates a color space object based on the provided 3x3 matrix color space descriptor.

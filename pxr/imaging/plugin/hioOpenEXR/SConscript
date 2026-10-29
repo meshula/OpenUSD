@@ -1,0 +1,128 @@
+Import('mfb')
+
+overrideIncludePaths = ['${PX_CONFIG_PACKAGE_NAME}']
+overrideIncludePaths.append(Dir('.').abspath)
+
+mfb.BeginPackage(owner=["tools-team-gpu@pixar.com"],
+                 description='Hydra plugin for reading OpenEXR image files',
+                 overrideIncludePath=' '.join(overrideIncludePaths))
+
+mfb.Libraries(
+    '''
+    pxr/base/arch
+    pxr/base/gf
+    pxr/base/plug
+    pxr/base/tf
+    pxr/base/vt
+    pxr/imaging/hio
+    ''')
+
+mfb.SystemLibraries(
+    '''
+    ''')
+
+mfb.PrivateHeaders('''
+	pch.h
+	OpenEXR/openexr-c.h
+	OpenEXR/deflate/common_defs.h
+	OpenEXR/deflate/lib/bt_matchfinder.h
+	OpenEXR/deflate/lib/matchfinder_common.h
+	OpenEXR/deflate/lib/zlib_constants.h
+	OpenEXR/deflate/lib/decompress_template.h
+	OpenEXR/deflate/lib/ht_matchfinder.h
+	OpenEXR/deflate/lib/deflate_compress.h
+	OpenEXR/deflate/lib/x86/decompress_impl.h
+	OpenEXR/deflate/lib/x86/cpu_features.h
+	OpenEXR/deflate/lib/x86/adler32_impl.h
+	OpenEXR/deflate/lib/x86/matchfinder_impl.h
+	OpenEXR/deflate/lib/lib_common.h
+	OpenEXR/deflate/lib/hc_matchfinder.h
+	OpenEXR/deflate/lib/cpu_features_common.h
+	OpenEXR/deflate/lib/arm/cpu_features.h
+	OpenEXR/deflate/lib/arm/adler32_impl.h
+	OpenEXR/deflate/lib/arm/matchfinder_impl.h
+	OpenEXR/deflate/lib/deflate_constants.h
+	OpenEXR/deflate/lib/adler32_vec_template.h
+	OpenEXR/deflate/libdeflate.h
+	OpenEXR/OpenEXRCore/openexr_encode.h
+	OpenEXR/OpenEXRCore/internal_float_vector.h
+	OpenEXR/OpenEXRCore/openexr_compression.h
+	OpenEXR/OpenEXRCore/openexr_std_attr.h
+	OpenEXR/OpenEXRCore/internal_huf.h
+	OpenEXR/OpenEXRCore/openexr_decode.h
+	OpenEXR/OpenEXRCore/internal_dwa_compressor.h
+	OpenEXR/OpenEXRCore/openexr_base.h
+	OpenEXR/OpenEXRCore/OpenEXRConfigInternal.h
+	OpenEXR/OpenEXRCore/internal_bytes.h
+	OpenEXR/OpenEXRCore/internal_dwa_simd.h
+	OpenEXR/OpenEXRCore/openexr_chunkio.h
+	OpenEXR/OpenEXRCore/internal_util.h
+	OpenEXR/OpenEXRCore/openexr_context.h
+	OpenEXR/OpenEXRCore/internal_dwa_classifier.h
+	OpenEXR/OpenEXRCore/internal_xdr.h
+	OpenEXR/OpenEXRCore/openexr_part.h
+	OpenEXR/OpenEXRCore/internal_coding.h
+	OpenEXR/OpenEXRCore/openexr_version.h
+	OpenEXR/OpenEXRCore/backward_compatibility.h
+	OpenEXR/OpenEXRCore/internal_opaque.h
+	OpenEXR/OpenEXRCore/internal_dwa_decoder.h
+	OpenEXR/OpenEXRCore/internal_dwa_channeldata.h
+	OpenEXR/OpenEXRCore/internal_channel_list.h
+	OpenEXR/OpenEXRCore/internal_attr.h
+	OpenEXR/OpenEXRCore/openexr_debug.h
+	OpenEXR/OpenEXRCore/openexr_coding.h
+	OpenEXR/OpenEXRCore/openexr_errors.h
+	OpenEXR/OpenEXRCore/openexr.h
+	OpenEXR/OpenEXRCore/internal_dwa_encoder.h
+	OpenEXR/OpenEXRCore/internal_memory.h
+	OpenEXR/OpenEXRCore/internal_string_vector.h
+	OpenEXR/OpenEXRCore/internal_preview.h
+	OpenEXR/OpenEXRCore/internal_cpuid.h
+	OpenEXR/OpenEXRCore/internal_file.h
+	OpenEXR/OpenEXRCore/internal_compress.h
+	OpenEXR/OpenEXRCore/internal_win32_file_impl.h
+	OpenEXR/OpenEXRCore/internal_dwa_helpers.h
+	OpenEXR/OpenEXRCore/internal_string.h
+	OpenEXR/OpenEXRCore/openexr_config.h
+	OpenEXR/OpenEXRCore/internal_constants.h
+	OpenEXR/OpenEXRCore/internal_structs.h
+	OpenEXR/OpenEXRCore/internal_decompress.h
+	OpenEXR/OpenEXRCore/openexr_attr.h
+	OpenEXR/OpenEXRCore/internal_posix_file_impl.h
+	OpenEXR/OpenEXRCore/internal_ht_common.h
+	OpenEXR/OpenEXRCore/internal_thread.h
+	OpenEXR/OpenEXRCoreUnity.h
+''')
+
+mfb.PrivateCFiles('''
+	OpenEXR/openexr-c.c
+''')
+
+# Hide symbols and inlines in the C code (mirrors CMakeLists.txt's
+# $<$<COMPILE_LANGUAGE:C>:-fvisibility=hidden>, which SCons gives us for
+# free since CFLAGS only reaches the C builder, not the C++ builder).
+mfb.CFlags('-fvisibility=hidden')
+
+mfb.PrivateCPPFiles('''
+	OpenEXRImage.cpp
+	OpenEXR/OpenEXRCore/internal_ht_common.cpp
+''')
+
+mfb.ResourceFiles('''plugInfo.json''')
+
+mfb.InstallTestSpec('testSpecs.xml')
+
+mfb.BuildTest('testHioOpenEXR',
+              '''
+              testenv/testHioOpenEXR.cpp
+              ''',
+              reqlibs='''pxr/base/tf
+                         pxr/imaging/hio
+              ''',
+              syslibs='''
+                         ''')
+
+mfb.InstallTestDir('testHioOpenEXR',
+                   'testenv/testHioOpenEXR')
+
+mfb.EndPackage()
