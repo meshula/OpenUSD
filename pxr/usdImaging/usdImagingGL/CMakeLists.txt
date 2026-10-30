@@ -2523,52 +2523,6 @@ pxr_register_test(testUsdImagingGLWireframeOpacity
     TESTENV testenv/testUsdImagingGLWireframeOpacity
 )
 
-<<<<<<< HEAD
-=======
-pxr_register_test(testUsdImagingGLCards_anim
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdImagingGLBasicDrawing -offscreen -lighting -shading smooth -frameAll -stage testAnim.usda -times 1 2 -write testAnim.png"
-    IMAGE_DIFF_COMPARE
-        testAnim_001.png
-        testAnim_002.png
-    FAIL 0.02
-    FAIL_PERCENT 0.2
-    WARN 0.03
-    WARN_PERCENT 0.05
-    EXPECTED_RETURN_CODE 0
-    TESTENV testenv/testUsdImagingGLCards
-    ENV
-        USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX=false
-)
-
-pxr_register_test(testUsdImagingGLCards_bounds
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdImagingGLBasicDrawing -unloadedAsBounds -offscreen -lighting -shading smooth -frameAll -stage testUnloadedAsBounds.usda -write testUnloadedAsBounds.png"
-    IMAGE_DIFF_COMPARE
-        testUnloadedAsBounds.png
-    FAIL 0.01
-    FAIL_PERCENT 0.1
-    WARN 0.02
-    WARN_PERCENT 0.05
-    EXPECTED_RETURN_CODE 0
-    TESTENV testenv/testUsdImagingGLCards
-    ENV
-        USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX=false
-)
-
-pxr_register_test(testUsdImagingGLCards_basic
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdImagingGLBasicDrawing -offscreen -lighting -shading smooth -frameAll -stage testCardsBasic.usda -camera /MainCamera -write testCardsBasic.png"
-    IMAGE_DIFF_COMPARE
-        testCardsBasic.png
-    FAIL 0.1
-    FAIL_PERCENT 0.1
-    WARN 0.2
-    WARN_PERCENT 0.05
-    EXPECTED_RETURN_CODE 0
-    TESTENV testenv/testUsdImagingGLCards
-    ENV
-        USDIMAGINGGL_ENGINE_ENABLE_SCENE_INDEX=false
-)
-
->>>>>>> 8918746c6 (profiles usdMatlxBake wip)
 # XXX: Commenting out while failures are being investigated.
 # 
 # pxr_register_test(testUsdImagingGLCards_SceneIndex
