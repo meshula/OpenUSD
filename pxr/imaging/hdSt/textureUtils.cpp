@@ -9,7 +9,6 @@
 
 #include "pxr/base/gf/half.h"
 #include "pxr/base/gf/math.h"
-#include "pxr/base/tf/errorMark.h"
 #include "pxr/base/trace/trace.h"
 
 #include "pxr/imaging/hgi/hgi.h"
@@ -144,8 +143,8 @@ _PremultiplyAlpha(
             if (isSRGB) {
                 // Convert value from sRGB to linear.
                 p = max * _ConvertColorSpace<_SRGBToLinear>(p / max);
-            }  
-            
+            }
+
             // Pre-multiply RGB values with alpha in linear space.
             p *= alpha;
 
@@ -155,7 +154,7 @@ _PremultiplyAlpha(
             }
 
             // Add 0.5 when converting float to integral type.
-            typedDst[4 * i + j] = p + 0.5f;  
+            typedDst[4 * i + j] = p + 0.5f;
         }
         // Only necessary when not converting in place.
         typedDst[4 * i + 3] = typedSrc[4 * i + 3];
@@ -274,7 +273,7 @@ _GetHgiFormatAndConversion(
         case HioFormatDouble64Vec4:
             TF_WARN("Double texture formats not supported by Storm");
             return { HgiFormatInvalid, nullptr };
-            
+
         // UInt16
         case HioFormatUInt16:
             return { HgiFormatUInt16, nullptr };
@@ -298,7 +297,7 @@ _GetHgiFormatAndConversion(
                 premultiplyAlpha
                     ? _PremultiplyAlpha<uint16_t, /* isSRGB = */ false>
                     : nullptr };
-            
+
         // Int16
         case HioFormatInt16:
         case HioFormatInt16Vec2:
@@ -340,7 +339,7 @@ _GetHgiFormatAndConversion(
                 premultiplyAlpha
                     ? _PremultiplyAlpha<int32_t, /* isSRGB = */ false>
                     : nullptr };
-                    
+
         // UNorm8 SRGB
         case HioFormatUNorm8srgb:
             // 1-channel gamma-encoded is not supported, so we need to convert.
@@ -436,11 +435,6 @@ HdStTextureUtils::GetAllMipImages(
                 filePath, subimage, mip, sourceColorSpace, suppressErrors);
 
         if (!image) {
-            if (mip > 0) {
-                // any non-mip-related errors would have been caught during
-                // creation of the HioImage object, so it's safe to clear here.
-                mark.Clear();
-            }
             break;
         }
 
@@ -491,7 +485,7 @@ HdStTextureUtils::ComputeDimensionsFromTargetMemory(
         const GfVec3i dim = _GetDimensions(image);
         // The factor of 4/3 = 1 + 1/4 + 1/16 + ... accounts for all the
         // lower mipmaps.
-        const size_t totalMem = 
+        const size_t totalMem =
             HgiGetDataSize(targetFormat, dim) * tileCount * 4 / 3;
         if (totalMem <= targetMemory) {
             if (mipIndex) {
