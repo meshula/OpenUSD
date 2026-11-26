@@ -37,8 +37,6 @@
                         "formatId": "phony",
                         "target": "usd",
                         "primary": true,
-                        "supportsEditing": false,
-                        "supportsWriting": false,
                         "impliesCapabilities": ["test.phony.fileformat"]
                     }
                 }

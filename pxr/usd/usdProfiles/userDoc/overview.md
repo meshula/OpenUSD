@@ -76,7 +76,9 @@ discovers and merges all registered capability data at startup:
 }
 ```
 
-Every capability graph must have exactly one root node named `usd`.
+Every capability graph must contain a root node named `usd`. Other, disjunct
+roots are allowed; for example, a vendor may root its own taxonomy at
+`yoyodyne` alongside `usd`.
 
 ### Profiles
 
@@ -103,6 +105,51 @@ path) and that `studio.vfx.25.11` is now a superseded predecessor (deprecated
 path). Querying `HasPredecessor("studio.vfx.26.08", "usd.geom.mesh")` returns
 `DeprecationConflict` because two paths exist — one direct and one through the
 deprecated `studio.vfx.25.11`.
+
+### Domains
+
+A **domain** is a capability node tagged with `"isDomain": true`. The flag
+defaults to `false`. A domain names the area of USD that a plugin contributes
+to, such as `usd` or `usd.geom`. A plugin declares its domain in the same
+`Capabilities` block where it declares its other capabilities:
+
+```{code-block} json
+"usd.geom": {
+    "predecessors": ["usd.core"],
+    "isDomain": true
+}
+```
+
+`GetTypeDomains(type)` reports which domains a type belongs to, even if the
+type declares no capabilities of its own:
+
+1. The plugin that defines the type is found via `PlugRegistry`.
+2. The domains that plugin declares are collected. Capabilities the type
+   implies through `impliesCapabilities` do not contribute.
+3. The domain ancestors of each declared domain are added from the DAG.
+
+Each domain is reported with an **order**: the length of the longest chain of
+domain nodes from a root to that domain, minus one. Non-domain nodes on the
+chain, such as `usd.core`, are not counted. So `usd` has order 0 and
+`usd.geom` has order 1. For a vendor taxonomy rooted at `yoyodyne`:
+
+| Domain                  | Predecessors            | Order |
+| ----------------------- | ----------------------- | ----- |
+| `yoyodyne`              | (root)                  | 0     |
+| `yoyodyne.overthruster` | `yoyodyne`              | 1     |
+| `yoyodyne.overthruster` | `yoyodyne`, `usd.geom`  | 2     |
+
+```{code-block} python
+from pxr import Tf, UsdGeom, UsdProfiles
+Reg = UsdProfiles.ProfileRegistry
+Reg.GetTypeDomains(Tf.Type.Find(UsdGeom.Cube))
+# [("usd", 0), ("usd.geom", 1)]
+```
+
+An empty result means the type's plugin declares no domain, or the type is
+unknown. There is no implicit fallback to `usd`. `GetPluginDomains(name)`
+answers the same question for a plugin by name, and `GetDomains(capability)`
+returns the domains among a capability and its ancestors.
 
 ### Capability Versioning
 

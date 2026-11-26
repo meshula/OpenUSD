@@ -96,7 +96,7 @@ class "ClaimsAPI"
             # profile token and list of present capabilities that 
             # don't pass audit. (may be empty)
             string[] "profile.studio.vfx.25.08" = []
-            string[] "vnd.apple.visionos_v1"    = ["usd.geom.hairAndFur"]
+            string[] "vnd.yoyodyne.overthruster_v1" = ["usd.geom.hairAndFur"]
         }
     }
     \\endcode

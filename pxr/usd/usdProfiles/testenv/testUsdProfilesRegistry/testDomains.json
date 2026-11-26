@@ -1,0 +1,81 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "Profiles": {
+                    "Capabilities": {
+                        "usd": {
+                            "docstring": "Root USD capability",
+                            "isDomain": true
+                        },
+                        "usd.core": {
+                            "predecessors": ["usd"],
+                            "docstring": "USD core library"
+                        },
+                        "usd.core.colorspace": {
+                            "predecessors": ["usd.core"],
+                            "docstring": "Color space, not a domain"
+                        }
+                    }
+                }
+            },
+            "Name": "core",
+            "Type": "resource"
+        },
+        {
+            "Info": {
+                "Profiles": {
+                    "Capabilities": {
+                        "usd.geom": {
+                            "predecessors": ["usd.core"],
+                            "docstring": "USD geometry schemas",
+                            "isDomain": true
+                        },
+                        "usd.geom.mesh": {
+                            "predecessors": ["usd.geom"],
+                            "docstring": "Polygonal mesh geometry"
+                        }
+                    }
+                }
+            },
+            "Name": "geom",
+            "Type": "resource"
+        },
+        {
+            "Info": {
+                "Profiles": {
+                    "Capabilities": {
+                        "yoyodyne": {
+                            "docstring": "Disjunct vendor root",
+                            "isDomain": true
+                        },
+                        "yoyodyne.overthruster": {
+                            "predecessors": ["yoyodyne"],
+                            "docstring": "Overthruster, not a domain"
+                        },
+                        "yoyodyne.ot.geom": {
+                            "predecessors": ["yoyodyne", "usd.geom"],
+                            "docstring": "Overthruster geometry",
+                            "isDomain": true
+                        }
+                    }
+                }
+            },
+            "Name": "yoyodyne",
+            "Type": "resource"
+        },
+        {
+            "Info": {
+                "Profiles": {
+                    "Capabilities": {
+                        "orphan": {
+                            "docstring": "Non-domain root"
+                        }
+                    }
+                }
+            },
+            "Name": "nodomain",
+            "Type": "resource"
+        }
+    ]
+}

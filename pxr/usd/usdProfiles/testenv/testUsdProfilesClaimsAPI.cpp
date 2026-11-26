@@ -187,16 +187,23 @@ TestProfilesInfoRoundTrip()
 
     // Write a raw dictionary and read it back
     VtDictionary usages;
-    usages["usd.geom.mesh"] = VtValue(TfToken("hard"));
+    usages["usd.geom.phony"] = VtValue(TfToken("hard"));
     VtDictionary info;
     info["capabilityUsages"] = VtValue(usages);
     api.SetProfilesInfo(info);
 
     VtDictionary got = api.GetProfilesInfo();
+
+    // GetProfilesInfo() returns the dictionary stored under "profiles",
+    // so "capabilityUsages" is directly a top-level key of 'got'.
     TF_AXIOM(got.count("capabilityUsages"));
 
+    const VtValue* val = got.GetValueAtPath("capabilityUsages");
+    TF_AXIOM(val && val->IsHolding<VtDictionary>());
+    TF_AXIOM(val->UncheckedGet<VtDictionary>().count("usd.geom.phony"));
+
     // The high-level API reads through the same storage
-    TF_AXIOM(api.GetCapabilityUsage(TfToken("usd.geom.mesh")) == TfToken("hard"));
+    TF_AXIOM(api.GetCapabilityUsage(TfToken("usd.geom.phony")) == TfToken("hard"));
 
     printf("  TestProfilesInfoRoundTrip passed\n");
 }

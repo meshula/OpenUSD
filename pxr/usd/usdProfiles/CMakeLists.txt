@@ -94,6 +94,23 @@ pxr_register_test(testUsdProfilesSchemaImplication
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdProfilesSchemaImplication"
 )
 
+pxr_build_test(testCustomGraph
+    LIBRARIES
+        tf
+        js
+        vt
+        sdf
+        usd
+        usdProfiles
+    CPPFILES
+        testenv/testCustomGraph.cpp
+)
+
+pxr_register_test(testCustomGraph
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testCustomGraph"
+    TESTENV testenv/testUsdProfilesRegistry
+)
+
 # Side-installed test plugin providing a minimal SdfFileFormat subclass plus
 # its own seeded capability sub-graph. Lets us regress the file-format ->
 # capability implication machinery without depending on any optional plugin

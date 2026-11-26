@@ -107,6 +107,47 @@ TestDirectRegistryQuery()
 }
 
 //----------------------------------------------------------------------------
+// TestTypeDomains
+//
+// Verifies GetTypeDomains resolves a type's plugin and reports the domains
+// that plugin declares in the real plugInfo.json files.
+//----------------------------------------------------------------------------
+
+static void
+TestTypeDomains()
+{
+    using DOV = UsdProfileRegistry::DomainOrderVector;
+
+    // UsdGeomCube declares no capabilities; its plugin declares usd.geom.
+    {
+        TfType t = UsdSchemaRegistry::GetTypeFromName(TfToken("Cube"));
+        TF_AXIOM(!t.IsUnknown());
+        TF_AXIOM(UsdProfileRegistry::GetTypeDomains(t) == DOV({
+            {TfToken("usd"), 0}, {TfToken("usd.geom"), 1}}));
+    }
+
+    // UsdColorSpaceAPI lives in the usd plugin, which declares usd.
+    {
+        TfType t = UsdSchemaRegistry::GetTypeFromName(TfToken("ColorSpaceAPI"));
+        TF_AXIOM(!t.IsUnknown());
+        TF_AXIOM(UsdProfileRegistry::GetTypeDomains(t) == DOV({
+            {TfToken("usd"), 0}}));
+    }
+
+    // usdShade declares no Profiles, so there is no domain.
+    {
+        TfType t = UsdSchemaRegistry::GetTypeFromName(TfToken("Material"));
+        TF_AXIOM(!t.IsUnknown());
+        TF_AXIOM(UsdProfileRegistry::GetTypeDomains(t).empty());
+    }
+
+    // Unknown TfType → empty
+    TF_AXIOM(UsdProfileRegistry::GetTypeDomains(TfType()).empty());
+
+    printf("  TestTypeDomains passed\n");
+}
+
+//----------------------------------------------------------------------------
 // TestMultiApplyDedupe
 //
 // Applying the same multi-apply schema N times must produce each capability
@@ -321,6 +362,7 @@ main(int argc, char* argv[])
 
     TestSeededCapabilityGraph();
     TestDirectRegistryQuery();
+    TestTypeDomains();
     TestMultiApplyDedupe();
     TestDefaultStrengthIsHard();
     TestAuthoredStrengthsAreRespected();

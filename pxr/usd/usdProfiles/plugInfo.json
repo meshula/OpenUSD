@@ -5,6 +5,15 @@
     "Plugins": [
         {
             "Info": {
+                "SdfMetadata": {
+                    "profiles": {
+                        "appliesTo": [
+                            "prims"
+                        ], 
+                        "documentation": "Profile and capability claims", 
+                        "type": "dictionary"
+                    }
+                }, 
                 "Types": {
                     "UsdProfilesClaimsAPI": {
                         "alias": {

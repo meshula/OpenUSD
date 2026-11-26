@@ -9,6 +9,7 @@
                     "Capabilities": {
                         "usd": {
                             "docstring": "Root capability for the USD taxonomy.", 
+                            "isDomain": true, 
                             "name": "USD", 
                             "style": "core", 
                             "subgraph": "Foundation"

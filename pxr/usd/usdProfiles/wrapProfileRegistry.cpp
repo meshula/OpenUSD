@@ -39,7 +39,8 @@ namespace {
 object
 _CoversCapabilities(const TfToken& perspective,
                     const std::vector<TfToken>& required,
-                    const std::vector<TfToken>& excepted)
+                    const std::vector<TfToken>& excepted,
+                    bool allowExceptions)
 {
     std::set<UsdProfileRegistry::CapabilityResult> results;
     UsdProfileRegistry::QueryStatus status =
@@ -47,6 +48,26 @@ _CoversCapabilities(const TfToken& perspective,
             perspective,
             std::set<TfToken>(required.begin(), required.end()),
             std::set<TfToken>(excepted.begin(), excepted.end()),
+            &results,
+            allowExceptions);
+    list pyResults;
+    for (const auto& r : results) {
+        pyResults.append(r);
+    }
+    return make_tuple(status, pyResults);
+}
+
+// SatisfiesCapabilities has an optional out-param; wrap it to return
+// (QueryStatus, [CapabilityResult, ...]) as a Python tuple.
+object
+_SatisfiesCapabilities(const TfToken& target,
+                       const std::vector<TfToken>& provided)
+{
+    std::set<UsdProfileRegistry::CapabilityResult> results;
+    UsdProfileRegistry::QueryStatus status =
+        UsdProfileRegistry::SatisfiesCapabilities(
+            target,
+            std::set<TfToken>(provided.begin(), provided.end()),
             &results);
     list pyResults;
     for (const auto& r : results) {
@@ -76,6 +97,37 @@ _ParseCapabilityVersion(const TfToken& capability)
     return make_tuple(base, ver);
 }
 
+// DomainOrderVector is a vector of (TfToken, int); wrap as a list of
+// (str, int) tuples.
+object
+_DomainOrderVectorToList(const UsdProfileRegistry::DomainOrderVector& domains)
+{
+    list result;
+    for (const auto& [domain, order] : domains) {
+        result.append(make_tuple(domain.GetString(), order));
+    }
+    return result;
+}
+
+object
+_GetDomains(const TfToken& capability)
+{
+    return _DomainOrderVectorToList(UsdProfileRegistry::GetDomains(capability));
+}
+
+object
+_GetTypeDomains(const TfType& type)
+{
+    return _DomainOrderVectorToList(UsdProfileRegistry::GetTypeDomains(type));
+}
+
+object
+_GetPluginDomains(const std::string& pluginName)
+{
+    return _DomainOrderVectorToList(
+        UsdProfileRegistry::GetPluginDomains(pluginName));
+}
+
 // _TestLoadFromFile returns (bool, [errors]) as a Python tuple.
 object
 _TestLoadFromFile(const std::string& filePath)
@@ -89,6 +141,30 @@ _TestLoadFromFile(const std::string& filePath)
     return make_tuple(ok, pyErrors);
 }
 
+// Python helpers for functions that take optional TypeCapabilityCache*
+std::set<TfToken>
+_GetTypeImpliedCapabilities(const TfType& type)
+{
+    return UsdProfileRegistry::GetTypeImpliedCapabilities(type);
+}
+
+std::set<TfToken>
+_GetSchemaImpliedCapabilities(const TfType& schemaType)
+{
+    return UsdProfileRegistry::GetSchemaImpliedCapabilities(schemaType);
+}
+
+std::set<TfToken>
+_GetFileFormatImpliedCapabilities(const TfType& formatType)
+{
+    return UsdProfileRegistry::GetFileFormatImpliedCapabilities(formatType);
+}
+
+std::set<TfToken>
+_GetPrimImpliedCapabilities(const UsdPrim& prim)
+{
+    return UsdProfileRegistry::GetPrimImpliedCapabilities(prim);
+}
 
 } // anonymous namespace
 
@@ -109,6 +185,9 @@ void wrapUsdProfileRegistry()
 
             .def("IsProfile",                 &This::IsProfile)
             .staticmethod("IsProfile")
+
+            .def("IsDomain",                  &This::IsDomain)
+            .staticmethod("IsDomain")
 
             .def("GetCapabilityMetadata",     &This::GetCapabilityMetadata)
             .staticmethod("GetCapabilityMetadata")
@@ -132,8 +211,12 @@ void wrapUsdProfileRegistry()
 
             .def("CoversCapabilities",        &_CoversCapabilities,
                  (arg("perspective"), arg("required"), arg("excepted")=
-                  std::vector<TfToken>()))
+                  std::vector<TfToken>(), arg("allowExceptions")=false))
             .staticmethod("CoversCapabilities")
+
+            .def("SatisfiesCapabilities",     &_SatisfiesCapabilities,
+                 (arg("target"), arg("provided")))
+            .staticmethod("SatisfiesCapabilities")
 
             .def("GetAllCapabilities",        &This::GetAllCapabilities,
                  return_value_policy<TfPySequenceToSet>())
@@ -142,6 +225,22 @@ void wrapUsdProfileRegistry()
             .def("GetAllProfiles",            &This::GetAllProfiles,
                  return_value_policy<TfPySequenceToSet>())
             .staticmethod("GetAllProfiles")
+
+            .def("GetAllDomains",             &This::GetAllDomains,
+                 return_value_policy<TfPySequenceToSet>())
+            .staticmethod("GetAllDomains")
+
+            .def("GetDomains",                &_GetDomains,
+                 (arg("capability")))
+            .staticmethod("GetDomains")
+
+            .def("GetTypeDomains",            &_GetTypeDomains,
+                 (arg("type")))
+            .staticmethod("GetTypeDomains")
+
+            .def("GetPluginDomains",          &_GetPluginDomains,
+                 (arg("pluginName")))
+            .staticmethod("GetPluginDomains")
 
             .def("GetStyleForCapability",     &This::GetStyleForCapability)
             .staticmethod("GetStyleForCapability")
@@ -158,17 +257,29 @@ void wrapUsdProfileRegistry()
             .def("GetCapabilityStyles",       &_GetCapabilityStyles)
             .staticmethod("GetCapabilityStyles")
 
+            .def("GetTypeImpliedCapabilities",
+                 &_GetTypeImpliedCapabilities,
+                 (arg("type")),
+                 return_value_policy<TfPySequenceToSet>())
+            .staticmethod("GetTypeImpliedCapabilities")
+
             .def("GetSchemaImpliedCapabilities",
-                 &This::GetSchemaImpliedCapabilities,
+                 &_GetSchemaImpliedCapabilities,
                  (arg("schemaType")),
                  return_value_policy<TfPySequenceToSet>())
             .staticmethod("GetSchemaImpliedCapabilities")
 
             .def("GetFileFormatImpliedCapabilities",
-                 &This::GetFileFormatImpliedCapabilities,
+                 &_GetFileFormatImpliedCapabilities,
                  (arg("formatType")),
                  return_value_policy<TfPySequenceToSet>())
             .staticmethod("GetFileFormatImpliedCapabilities")
+
+            .def("GetPrimImpliedCapabilities",
+                 &_GetPrimImpliedCapabilities,
+                 (arg("prim")),
+                 return_value_policy<TfPySequenceToSet>())
+            .staticmethod("GetPrimImpliedCapabilities")
 
             .def("_TestClear",                &Usd_ProfilesRegistryTestClear)
             .staticmethod("_TestClear")
@@ -181,12 +292,12 @@ void wrapUsdProfileRegistry()
         // Nested types: QueryStatus and CapabilityResult are scoped under
         // ProfileRegistry in Python (UsdProfiles.ProfileRegistry.QueryStatus).
         enum_<QS>("QueryStatus")
-            .value("NoPath",              QS::NoPath)
-            .value("ValidPath",           QS::ValidPath)
-            .value("Deprecated",          QS::Deprecated)
+            .value("NoPath",               QS::NoPath)
+            .value("ValidPath",            QS::ValidPath)
+            .value("Deprecated",           QS::Deprecated)
             .value("DeprecationConflict", QS::DeprecationConflict)
-            .value("Excepted",            QS::Excepted)
-            .value("CycleFound",          QS::CycleFound)
+            .value("Excepted",             QS::Excepted)
+            .value("CycleFound",           QS::CycleFound)
             ;
 
         class_<CR>("CapabilityResult", no_init)

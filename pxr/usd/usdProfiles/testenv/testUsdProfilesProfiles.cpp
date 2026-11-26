@@ -85,6 +85,75 @@ TestIsProfile()
 }
 
 //----------------------------------------------------------------------------
+// TestDomains
+//
+// Verifies IsDomain(), GetAllDomains(), and the domain order rule: the longest
+// chain of domain nodes from a root, minus one. Non-domain nodes such as
+// usd.core don't count, and disjunct roots (yoyodyne) are allowed.
+//----------------------------------------------------------------------------
+
+static void
+TestDomains()
+{
+    using DOV = UsdProfileRegistry::DomainOrderVector;
+
+    std::vector<std::string> errors;
+    bool ok = Usd_ProfilesRegistryTestLoadFromFile("testDomains.json", &errors);
+    TF_AXIOM(ok);
+    TF_AXIOM(errors.empty());
+
+    TF_AXIOM( UsdProfileRegistry::IsDomain(TfToken("usd")));
+    TF_AXIOM( UsdProfileRegistry::IsDomain(TfToken("usd.geom")));
+    TF_AXIOM( UsdProfileRegistry::IsDomain(TfToken("yoyodyne")));
+    TF_AXIOM( UsdProfileRegistry::IsDomain(TfToken("yoyodyne.ot.geom")));
+    TF_AXIOM(!UsdProfileRegistry::IsDomain(TfToken("usd.core")));
+    TF_AXIOM(!UsdProfileRegistry::IsDomain(TfToken("usd.core.colorspace")));
+    TF_AXIOM(!UsdProfileRegistry::IsDomain(
+        TfToken("yoyodyne.overthruster")));
+    TF_AXIOM(!UsdProfileRegistry::IsDomain(TfToken("orphan")));
+    TF_AXIOM(!UsdProfileRegistry::IsDomain(TfToken("no.such.capability")));
+    TF_AXIOM(!UsdProfileRegistry::IsDomain(TfToken()));
+
+    TF_AXIOM(UsdProfileRegistry::GetAllDomains() == std::set<TfToken>({
+        TfToken("usd"), TfToken("usd.geom"),
+        TfToken("yoyodyne"), TfToken("yoyodyne.ot.geom")}));
+
+    TF_AXIOM(UsdProfileRegistry::GetCapabilityMetadata(TfToken("usd.geom"))
+             ["isDomain"] == VtValue(true));
+    TF_AXIOM(UsdProfileRegistry::GetCapabilityMetadata(TfToken("usd.core"))
+             ["isDomain"] == VtValue(false));
+
+    TF_AXIOM(UsdProfileRegistry::GetDomains(TfToken("usd.geom.mesh")) == DOV({
+        {TfToken("usd"), 0}, {TfToken("usd.geom"), 1}}));
+
+    TF_AXIOM(UsdProfileRegistry::GetDomains(TfToken("usd.core.colorspace"))
+             == DOV({{TfToken("usd"), 0}}));
+
+    TF_AXIOM(UsdProfileRegistry::GetDomains(TfToken("yoyodyne.overthruster"))
+             == DOV({{TfToken("yoyodyne"), 0}}));
+
+    TF_AXIOM(UsdProfileRegistry::GetDomains(TfToken("yoyodyne.ot.geom")) == DOV({
+        {TfToken("usd"), 0}, {TfToken("yoyodyne"), 0},
+        {TfToken("usd.geom"), 1}, {TfToken("yoyodyne.ot.geom"), 2}}));
+
+    TF_AXIOM(UsdProfileRegistry::GetPluginDomains("core") == DOV({
+        {TfToken("usd"), 0}}));
+    TF_AXIOM(UsdProfileRegistry::GetPluginDomains("geom") == DOV({
+        {TfToken("usd"), 0}, {TfToken("usd.geom"), 1}}));
+    TF_AXIOM(UsdProfileRegistry::GetPluginDomains("yoyodyne") == DOV({
+        {TfToken("usd"), 0}, {TfToken("yoyodyne"), 0},
+        {TfToken("usd.geom"), 1}, {TfToken("yoyodyne.ot.geom"), 2}}));
+
+    TF_AXIOM(UsdProfileRegistry::GetPluginDomains("nodomain").empty());
+    TF_AXIOM(UsdProfileRegistry::GetPluginDomains("no.such.plugin").empty());
+    TF_AXIOM(UsdProfileRegistry::GetDomains(TfToken("orphan")).empty());
+    TF_AXIOM(UsdProfileRegistry::GetDomains(TfToken("no.such.capability")).empty());
+    TF_AXIOM(UsdProfileRegistry::GetTypeDomains(TfType()).empty());
+
+    printf("  TestDomains passed\n");
+}
+
+//----------------------------------------------------------------------------
 // TestCoversCapabilities
 //
 // Factored from testUsdProfilesRegistry: verifies the full contract of
@@ -183,6 +252,32 @@ TestCoversCapabilities()
         TF_AXIOM(status == QS::NoPath);
         TF_AXIOM(_ResultStatus(results, TfToken("usd.geom.mesh")) == QS::Excepted);
         TF_AXIOM(_ResultStatus(results, TfToken("usd")) == QS::ValidPath);
+    }
+
+    // allowExceptions: excepted caps are excused, aggregate → Excepted
+    {
+        std::set<TfToken> required = {
+            TfToken("usd.geom.mesh"), TfToken("usd"),
+        };
+        std::set<TfToken> ex = {TfToken("usd.geom.mesh")};
+        std::set<CR> results;
+        QS status = UsdProfileRegistry::CoversCapabilities(
+            TfToken("profile.25.11"), required, ex, &results,
+            /* allowExceptions */ true);
+        TF_AXIOM(status == QS::Excepted);
+        TF_AXIOM(_ResultStatus(results, TfToken("usd.geom.mesh")) == QS::Excepted);
+        TF_AXIOM(_ResultStatus(results, TfToken("usd")) == QS::ValidPath);
+    }
+
+    // allowExceptions doesn't excuse a cap that isn't excepted
+    {
+        std::set<TfToken> required = {
+            TfToken("usd.geom.mesh"), TfToken("no.such.cap"),
+        };
+        std::set<TfToken> ex = {TfToken("usd.geom.mesh")};
+        QS status = UsdProfileRegistry::CoversCapabilities(
+            TfToken("profile.25.11"), required, ex, nullptr, true);
+        TF_AXIOM(status == QS::NoPath);
     }
 
     // Excepted cap not in required → no effect
@@ -304,6 +399,9 @@ main(int argc, char* argv[])
 
     Usd_ProfilesRegistryTestClear();
     TestIsProfile();
+
+    Usd_ProfilesRegistryTestClear();
+    TestDomains();
 
     Usd_ProfilesRegistryTestClear();
     TestCoversCapabilities();

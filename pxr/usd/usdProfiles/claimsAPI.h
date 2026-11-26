@@ -107,7 +107,7 @@ class SdfAssetPath;
 /// # profile token and list of present capabilities that 
 /// # don't pass audit. (may be empty)
 /// string[] "profile.studio.vfx.25.08" = []
-/// string[] "vnd.apple.visionos_v1"    = ["usd.geom.hairAndFur"]
+/// string[] "vnd.yoyodyne.overthruster_v1" = ["usd.geom.hairAndFur"]
 /// }
 /// }
 /// \endcode
@@ -379,12 +379,39 @@ public:
     /// If \p results is non-null it is populated with per-capability detail,
     /// following the same contract as \c CoversCapabilities.
     ///
+    /// By default a stored exception does not excuse a capability. A prim
+    /// is not compatible with \p profile while it uses anything the profile
+    /// doesn't support. If \p allowExceptions is true, excepted capabilities
+    /// are excused, and a prim that is compatible only because of them
+    /// returns \c QueryStatus::Excepted.
+    ///
     /// Returns \c QueryStatus::NoPath if \p profile is not a declared
     /// compatible profile on this prim, or if no capability usages have been
     /// recorded.
     USDPROFILES_API
     UsdProfileRegistry::QueryStatus IsCompatibleWith(
         const TfToken &profile,
+        std::set<UsdProfileRegistry::CapabilityResult> *results = nullptr,
+        bool allowExceptions = false) const;
+
+    /// Returns the \c QueryStatus representing whether this prim provides
+    /// every capability that \p target (a capability or profile) requires.
+    ///
+    /// This is the converse of \c IsCompatibleWith: \c IsCompatibleWith
+    /// asks whether a profile supports everything the prim uses, while
+    /// \c Satisfies asks whether the prim has every prerequisite of
+    /// \p target. Unlike \c IsCompatibleWith, no compatibility entry needs
+    /// to be authored for \p target.
+    ///
+    /// This is a convenience that calls
+    /// \c UsdProfileRegistry::SatisfiesCapabilities() with the capability
+    /// tokens from \c GetCapabilityUsages() as \p provided.
+    ///
+    /// If \p results is non-null it is populated with per-requirement detail;
+    /// missing requirements are reported as \c NoPath.
+    USDPROFILES_API
+    UsdProfileRegistry::QueryStatus Satisfies(
+        const TfToken &target,
         std::set<UsdProfileRegistry::CapabilityResult> *results = nullptr)
         const;
 

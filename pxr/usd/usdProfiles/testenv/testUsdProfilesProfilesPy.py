@@ -6,7 +6,7 @@
 # https://openusd.org/license.
 
 import unittest
-from pxr import Usd, UsdProfiles
+from pxr import Tf, Usd, UsdProfiles
 
 QS = UsdProfiles.ProfileRegistry.QueryStatus
 PR = UsdProfiles.ProfileRegistry
@@ -91,6 +91,53 @@ class TestIsProfile(unittest.TestCase):
             PR.HasPredecessor("usd.core.26.11", "usd.core.26.03"), QS.Deprecated)
 
 
+class TestDomains(unittest.TestCase):
+    """IsDomain(), GetAllDomains(), and the domain order rule."""
+
+    @classmethod
+    def setUpClass(cls):
+        ok, errors = _load("testDomains.json")
+        assert ok, errors
+        assert not errors, errors
+
+    def test_IsDomain(self):
+        for cap in ("usd", "usd.geom", "yoyodyne", "yoyodyne.ot.geom"):
+            self.assertTrue(PR.IsDomain(cap), cap)
+        for cap in ("usd.core", "usd.core.colorspace", "yoyodyne.overthruster",
+                    "orphan", "no.such.capability", ""):
+            self.assertFalse(PR.IsDomain(cap), cap)
+
+    def test_GetAllDomains(self):
+        self.assertEqual(PR.GetAllDomains(),
+                         {"usd", "usd.geom", "yoyodyne", "yoyodyne.ot.geom"})
+
+    def test_MetadataIsDomain(self):
+        self.assertTrue(PR.GetCapabilityMetadata("usd.geom")["isDomain"])
+        self.assertFalse(PR.GetCapabilityMetadata("usd.core")["isDomain"])
+
+    def test_GetDomains(self):
+        self.assertEqual(PR.GetDomains("usd.geom.mesh"),
+                         [("usd", 0), ("usd.geom", 1)])
+        self.assertEqual(PR.GetDomains("usd.core.colorspace"), [("usd", 0)])
+        self.assertEqual(PR.GetDomains("yoyodyne.overthruster"),
+                         [("yoyodyne", 0)])
+        self.assertEqual(PR.GetDomains("yoyodyne.ot.geom"),
+                         [("usd", 0), ("yoyodyne", 0), ("usd.geom", 1),
+                          ("yoyodyne.ot.geom", 2)])
+
+    def test_GetPluginDomains(self):
+        self.assertEqual(PR.GetPluginDomains("core"), [("usd", 0)])
+        self.assertEqual(PR.GetPluginDomains("geom"),
+                         [("usd", 0), ("usd.geom", 1)])
+
+    def test_EmptyResults(self):
+        self.assertEqual(PR.GetPluginDomains("nodomain"), [])
+        self.assertEqual(PR.GetPluginDomains("no.such.plugin"), [])
+        self.assertEqual(PR.GetDomains("orphan"), [])
+        self.assertEqual(PR.GetDomains("no.such.capability"), [])
+        self.assertEqual(PR.GetTypeDomains(Tf.Type.Unknown), [])
+
+
 class TestCoversCapabilities(unittest.TestCase):
     """Factored from testUsdProfilesRegistry: full CoversCapabilities contract."""
 
@@ -142,6 +189,15 @@ class TestCoversCapabilities(unittest.TestCase):
         excepted = ["usd.geom.mesh"]
         status, results = PR.CoversCapabilities("profile.25.11", required, excepted)
         self.assertEqual(status, QS.NoPath)
+        self.assertEqual(_resultStatus(results, "usd.geom.mesh"), QS.Excepted)
+        self.assertEqual(_resultStatus(results, "usd"), QS.ValidPath)
+
+    def test_ExceptedAllowed(self):
+        required = ["usd.geom.mesh", "usd"]
+        excepted = ["usd.geom.mesh"]
+        status, results = PR.CoversCapabilities(
+            "profile.25.11", required, excepted, allowExceptions=True)
+        self.assertEqual(status, QS.Excepted)
         self.assertEqual(_resultStatus(results, "usd.geom.mesh"), QS.Excepted)
         self.assertEqual(_resultStatus(results, "usd"), QS.ValidPath)
 

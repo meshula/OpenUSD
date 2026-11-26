@@ -69,6 +69,30 @@ class TestDirectRegistryQuery(unittest.TestCase):
         self.assertEqual(caps1, caps2)
 
 
+class TestTypeDomains(unittest.TestCase):
+    """GetTypeDomains reports the domains declared by a type's plugin."""
+
+    def test_GeomTypeReportsGeomDomain(self):
+        # UsdGeomCube declares no capabilities; its plugin declares usd.geom.
+        t = Usd.SchemaRegistry.GetTypeFromName("Cube")
+        self.assertFalse(t.isUnknown)
+        self.assertEqual(PR.GetTypeDomains(t), [("usd", 0), ("usd.geom", 1)])
+
+    def test_UsdTypeReportsUsdDomain(self):
+        t = Usd.SchemaRegistry.GetTypeFromName("ColorSpaceAPI")
+        self.assertFalse(t.isUnknown)
+        self.assertEqual(PR.GetTypeDomains(t), [("usd", 0)])
+
+    def test_PluginWithoutProfilesReportsNoDomain(self):
+        # usdShade declares no Profiles.
+        t = Usd.SchemaRegistry.GetTypeFromName("Material")
+        self.assertFalse(t.isUnknown)
+        self.assertEqual(PR.GetTypeDomains(t), [])
+
+    def test_UnknownTypeReportsNoDomain(self):
+        self.assertEqual(PR.GetTypeDomains(Tf.Type.Unknown), [])
+
+
 class TestMultiApplyDedupe(unittest.TestCase):
     """Applying the same multi-apply schema N times should imply each
     capability exactly once, defaulted to hard."""

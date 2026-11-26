@@ -124,11 +124,24 @@ void wrapUsdProfilesClaimsAPI()
 namespace {
 
 static object
-_IsCompatibleWith(const UsdProfilesClaimsAPI& self, const TfToken& profile)
+_IsCompatibleWith(const UsdProfilesClaimsAPI& self, const TfToken& profile,
+                  bool allowExceptions)
 {
     std::set<UsdProfileRegistry::CapabilityResult> results;
     UsdProfileRegistry::QueryStatus status =
-        self.IsCompatibleWith(profile, &results);
+        self.IsCompatibleWith(profile, &results, allowExceptions);
+    list pyResults;
+    for (const auto& r : results)
+        pyResults.append(r);
+    return make_tuple(status, pyResults);
+}
+
+static object
+_Satisfies(const UsdProfilesClaimsAPI& self, const TfToken& target)
+{
+    std::set<UsdProfileRegistry::CapabilityResult> results;
+    UsdProfileRegistry::QueryStatus status =
+        self.Satisfies(target, &results);
     list pyResults;
     for (const auto& r : results)
         pyResults.append(r);
@@ -167,7 +180,9 @@ WRAP_CUSTOM {
              arg("profile"))
 
         .def("IsCompatibleWith", &_IsCompatibleWith,
-             arg("profile"))
+             (arg("profile"), arg("allowExceptions")=false))
+        .def("Satisfies", &_Satisfies,
+             arg("target"))
 
         .def("PopulateCapabilityUsages",
              &UsdProfilesClaimsAPI::PopulateCapabilityUsages)

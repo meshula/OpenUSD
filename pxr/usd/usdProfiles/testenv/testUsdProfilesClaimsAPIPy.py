@@ -134,13 +134,12 @@ class TestProfilesInfoRoundTrip(unittest.TestCase):
         got = self.api.GetProfilesInfo()
         self.assertIn("capabilityUsages", got)
 
-    def test_SharedStorage(self):
-        # High-level write is visible to raw read — same underlying storage
-        self.api.SetCapabilityUsage("usd.geom.mesh", "hard")
-        got = self.api.GetProfilesInfo()
-        self.assertIn("capabilityUsages", got)
-        self.assertIn("usd.geom.mesh", got["capabilityUsages"])
-
+def test_SharedStorage(self):
+    self.api.SetCapabilityUsage("usd.geom.mesh", "hard")
+    got = self.api.GetProfilesInfo()
+    self.assertIn("profiles", got)
+    self.assertIn("capabilityUsages", got["profiles"])
+    self.assertEqual(got["profiles"]["capabilityUsages"].get("usd.geom.mesh"), "hard")
 
 if __name__ == '__main__':
     unittest.main()

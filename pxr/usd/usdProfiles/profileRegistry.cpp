@@ -7,8 +7,10 @@
 
 #include "pxr/pxr.h"
 #include "pxr/usd/usdProfiles/api.h"
+#include "pxr/usd/usdProfiles/claimsAPI.h"
 #include "pxr/usd/usdProfiles/profileRegistry.h"
 #include "pxr/usd/usdProfiles/tokens.h"
+#include "pxr/usd/pcp/layerStack.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
 #include "pxr/base/js/json.h"
@@ -21,7 +23,10 @@
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/vt/value.h"
+#include "pxr/usd/sdf/fileFormat.h"
+#include "pxr/usd/usd/resolver.h"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <mutex>
@@ -44,6 +49,7 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
     ((NameKey, "name"))
     ((DocstringKey, "docstring"))
     ((IsProfileKey, "isProfile"))
+    ((IsDomainKey, "isDomain"))
     );
 
 namespace {
@@ -60,26 +66,33 @@ namespace {
 /// that names a coherent set of capabilities for a specific use case
 /// (e.g., a versioned OpenUSD release).
 ///
+/// IsDomain indicates the node is tagged as a domain — a capability that
+/// names the area of USD a plugin contributes to (e.g., usd.geom).
+///
 class Capability {
 public:
     Capability()
         : _isProfile(false)
+        , _isDomain(false)
     {}
 
     Capability(const TfToken& id)
         : _id(id)
         , _name(id)
         , _isProfile(false)
+        , _isDomain(false)
     {}
 
     Capability(const TfToken& id,
                 const TfToken& name,
                 const std::string& docstring,
-                bool isProfile = false)
+                bool isProfile = false,
+                bool isDomain = false)
         : _id(id)
         , _name(name)
         , _docstring(docstring)
         , _isProfile(isProfile)
+        , _isDomain(isDomain)
     {}
 
     const TfToken& GetId() const { return _id; }
@@ -88,6 +101,7 @@ public:
     const TfToken& GetSubgraph() const { return _subgraph; }
     const std::string& GetDocString() const { return _docstring; }
     bool IsProfile() const { return _isProfile; }
+    bool IsDomain() const { return _isDomain; }
 
     void SetStyle(const TfToken& style) { _style = style; }
     void SetSubgraph(const TfToken& subgraph) { _subgraph = subgraph; }
@@ -99,6 +113,7 @@ private:
     TfToken _subgraph;      // Grouping for this capability for visualization
     std::string _docstring; // Documentation
     bool _isProfile;        // True if capability is a profile
+    bool _isDomain;         // True if capability is a domain
 };
 
 } // anon
@@ -130,6 +145,7 @@ public:
     bool ValidateEdges(std::vector<std::string>* errors = nullptr) const;
     std::set<TfToken> GetAllCapabilities() const;
     std::set<TfToken> GetAllProfiles() const;
+    std::set<TfToken> GetAllDomains() const;
     std::optional<Capability> GetMetadata(const TfToken& cap) const;
     bool HasCapability(const TfToken& cap) const;
 
@@ -147,12 +163,25 @@ public:
 
     bool ValidateRoot(std::vector<std::string>* errors = nullptr) const;
 
+    bool IsDomain(const TfToken& cap) const;
+
+    // Domains among cap and its transitive predecessors, with their orders,
+    // sorted by (order, token).
+    UsdProfileRegistry::DomainOrderVector GetDomains(const TfToken& cap) const;
+
     // Single-pass DFS helper for GetTransitivePredecessors.
     void _DFSTransitive(
         const TfToken& node,
         bool pathDeprecated,
         std::unordered_map<TfToken, UsdProfileRegistry::QueryStatus,
                            TfToken::HashFunctor>& status,
+        std::unordered_set<TfToken, TfToken::HashFunctor>& inPath) const;
+
+    // Memoized DFS helper for GetDomains: the number of domain nodes on the
+    // longest chain from a root to node, inclusive.
+    int _DomainDepth(
+        const TfToken& node,
+        std::unordered_map<TfToken, int, TfToken::HashFunctor>& memo,
         std::unordered_set<TfToken, TfToken::HashFunctor>& inPath) const;
 
     // The graph is represented as a set of nodes and their incoming edges.
@@ -199,10 +228,10 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateAcyclic(
         if (incomingDegree.find(id) == incomingDegree.end()) {
             incomingDegree[id] = 0;
         }
-        
+
         // record the predecessor count for this node
         incomingDegree[id] = static_cast<int>(edges.size());
-        
+
         for (const auto& edge : edges) {
             dependents[edge.name].push_back(id);
             // Ensure the predecessor is also tracked in incomingDegree
@@ -277,8 +306,8 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateEdges(
     return valid;
 }
 
-/// Validate that the graph has exactly one root (a node with no predecessors)
-/// and that it is named "usd". Skipped for empty graphs.
+/// Validate that the graph contains a root node named "usd". Other,
+/// disjunct roots are allowed. Skipped for empty graphs.
 /// Returns true if valid (or empty), false otherwise.
 bool UsdProfileRegistry::_CapabilityGraph::ValidateRoot(
                     std::vector<std::string>* errors) const
@@ -295,28 +324,24 @@ bool UsdProfileRegistry::_CapabilityGraph::ValidateRoot(
     }
 
     static const TfToken usdRoot("usd");
-
-    if (roots.size() != 1) {
+    size_t rootsNamedUsd = 0;
+    for (auto root: roots) {
+        if (root == usdRoot) {
+            ++rootsNamedUsd;
+        }
+    }
+    if (rootsNamedUsd != 1) {
         if (errors) {
             std::vector<std::string> rootNames;
             for (const TfToken& r : roots) {
                 rootNames.push_back(r.GetString());
             }
             errors->push_back(TfStringPrintf(
-                "Graph must have exactly one root node named 'usd', "
+                "Graph must contain a root node named 'usd', "
                 "but found %zu root(s): %s",
                 roots.size(),
                 roots.empty() ? "(none)" :
                     TfStringJoin(rootNames, ", ").c_str()));
-        }
-        return false;
-    }
-
-    if (roots[0] != usdRoot) {
-        if (errors) {
-            errors->push_back(TfStringPrintf(
-                "Graph root must be named 'usd', but found '%s'",
-                roots[0].GetText()));
         }
         return false;
     }
@@ -342,6 +367,22 @@ std::set<TfToken> UsdProfileRegistry::_CapabilityGraph::GetAllProfiles() const {
         }
     }
     return result;
+}
+
+/// Get all capability IDs tagged as domains (isDomain=true).
+std::set<TfToken> UsdProfileRegistry::_CapabilityGraph::GetAllDomains() const {
+    std::set<TfToken> result;
+    for (const auto& [id, cap] : metadata) {
+        if (cap.IsDomain()) {
+            result.insert(id);
+        }
+    }
+    return result;
+}
+
+bool UsdProfileRegistry::_CapabilityGraph::IsDomain(const TfToken& cap) const {
+    auto it = metadata.find(cap);
+    return it != metadata.end() && it->second.IsDomain();
 }
 
 std::optional<Capability> UsdProfileRegistry::_CapabilityGraph::GetMetadata(
@@ -484,6 +525,65 @@ UsdProfileRegistry::_CapabilityGraph::_DFSTransitive(
     inPath.erase(node);
 }
 
+/// Return the domains among \p cap and its transitive predecessors. A
+/// domain's order is the number of domain nodes on the longest chain from a
+/// root to it, minus one. Deprecated edges are followed.
+UsdProfileRegistry::DomainOrderVector
+UsdProfileRegistry::_CapabilityGraph::GetDomains(const TfToken& cap) const {
+    UsdProfileRegistry::DomainOrderVector result;
+    if (!HasCapability(cap)) {
+        return result;
+    }
+
+    std::set<TfToken> candidates = UsdProfileRegistry::CapabilityResultsToTokens(
+        GetTransitivePredecessors(cap));
+    candidates.insert(cap);
+
+    std::unordered_map<TfToken, int, TfToken::HashFunctor> memo;
+    std::unordered_set<TfToken, TfToken::HashFunctor> inPath;
+    for (const TfToken& c : candidates) {
+        if (IsDomain(c)) {
+            result.emplace_back(c, _DomainDepth(c, memo, inPath) - 1);
+        }
+    }
+
+    std::sort(result.begin(), result.end(),
+        [](const auto& a, const auto& b) {
+            return a.second != b.second ? a.second < b.second
+                                        : a.first < b.first;
+        });
+    return result;
+}
+
+int
+UsdProfileRegistry::_CapabilityGraph::_DomainDepth(
+    const TfToken& node,
+    std::unordered_map<TfToken, int, TfToken::HashFunctor>& memo,
+    std::unordered_set<TfToken, TfToken::HashFunctor>& inPath) const
+{
+    auto memoIt = memo.find(node);
+    if (memoIt != memo.end()) {
+        return memoIt->second;
+    }
+    if (!inPath.insert(node).second) {
+        return 0;  // cycle in current DFS path
+    }
+
+    int maxPredDepth = 0;
+    auto edgesIt = incomingEdgeMap.find(node);
+    if (edgesIt != incomingEdgeMap.end()) {
+        for (const auto& edge : edgesIt->second) {
+            maxPredDepth = std::max(maxPredDepth,
+                                    _DomainDepth(edge.name, memo, inPath));
+        }
+    }
+
+    inPath.erase(node);
+    int depth = (IsDomain(node) ? 1 : 0) + maxPredDepth;
+    memo[node] = depth;
+    return depth;
+}
+
 UsdProfileRegistry::_CapabilityGraph::_CapabilityGraph() = default;
 UsdProfileRegistry::_CapabilityGraph::~_CapabilityGraph() = default;
 
@@ -526,7 +626,8 @@ UsdProfileRegistry::CoversCapabilities(
     const TfToken& perspective,
     const std::set<TfToken>& required,
     const std::set<TfToken>& excepted,
-    std::set<CapabilityResult>* results)
+    std::set<CapabilityResult>* results,
+    bool allowExceptions)
 {
     if (results) {
         results->clear();
@@ -560,6 +661,7 @@ UsdProfileRegistry::CoversCapabilities(
     // A single NoPath (or Excepted) makes the aggregate NoPath.
     QueryStatus aggregate = QueryStatus::ValidPath;
     bool anyNoPath = false;
+    bool anyExcepted = false;
 
     for (const TfToken& cap : required) {
         // Resolve each required capability — unversioned names match the
@@ -582,6 +684,11 @@ UsdProfileRegistry::CoversCapabilities(
             results->insert({reportToken, s});
         }
 
+        if (s == QueryStatus::Excepted && allowExceptions) {
+            anyExcepted = true;
+            continue;
+        }
+
         if (s == QueryStatus::NoPath || s == QueryStatus::CycleFound
                 || s == QueryStatus::Excepted) {
             anyNoPath = true;
@@ -590,6 +697,66 @@ UsdProfileRegistry::CoversCapabilities(
         }
 
         // Escalate aggregate: DeprecationConflict > Deprecated > ValidPath
+        if (s == QueryStatus::DeprecationConflict) {
+            aggregate = QueryStatus::DeprecationConflict;
+        } else if (s == QueryStatus::Deprecated
+                   && aggregate != QueryStatus::DeprecationConflict) {
+            aggregate = QueryStatus::Deprecated;
+        }
+    }
+
+    if (anyNoPath) {
+        return QueryStatus::NoPath;
+    }
+    if (anyExcepted && aggregate != QueryStatus::DeprecationConflict) {
+        return QueryStatus::Excepted;
+    }
+    return aggregate;
+}
+
+/* static */
+UsdProfileRegistry::QueryStatus
+UsdProfileRegistry::SatisfiesCapabilities(
+    const TfToken& target,
+    const std::set<TfToken>& provided,
+    std::set<CapabilityResult>* results)
+{
+    TfToken resolvedTarget = ResolveCapability(target);
+    if (resolvedTarget.IsEmpty()) {
+        return QueryStatus::NoPath;
+    }
+
+    std::unordered_set<TfToken, TfToken::HashFunctor> resolvedProvided;
+    for (const TfToken& p : provided) {
+        TfToken resolved = ResolveCapability(p);
+        resolvedProvided.insert(resolved.IsEmpty() ? p : resolved);
+    }
+
+    // Requirements are every ancestor of the target, plus the target itself
+    // unless it is a profile.
+    std::set<CapabilityResult> required =
+        GetTransitivePredecessors(resolvedTarget);
+    if (!IsProfile(resolvedTarget)) {
+        required.insert({resolvedTarget, QueryStatus::ValidPath});
+    }
+
+    // Precedence: NoPath > DeprecationConflict > Deprecated > ValidPath
+    QueryStatus aggregate = QueryStatus::ValidPath;
+    bool anyNoPath = false;
+
+    for (const CapabilityResult& req : required) {
+        QueryStatus s = resolvedProvided.count(req.capability)
+            ? req.status : QueryStatus::NoPath;
+
+        if (results) {
+            results->insert({req.capability, s});
+        }
+
+        if (s == QueryStatus::NoPath || s == QueryStatus::CycleFound) {
+            anyNoPath = true;
+            continue;
+        }
+
         if (s == QueryStatus::DeprecationConflict) {
             aggregate = QueryStatus::DeprecationConflict;
         } else if (s == QueryStatus::Deprecated
@@ -613,6 +780,13 @@ UsdProfileRegistry::IsProfile(const TfToken& capability)
 }
 
 /* static */
+bool
+UsdProfileRegistry::IsDomain(const TfToken& capability)
+{
+    return GetInstance()._capabilityGraph->IsDomain(capability);
+}
+
+/* static */
 VtDictionary
 UsdProfileRegistry::GetCapabilityMetadata(const TfToken& capability)
 {
@@ -624,6 +798,7 @@ UsdProfileRegistry::GetCapabilityMetadata(const TfToken& capability)
         result["style"]     = VtValue(c->GetStyle().GetString());
         result["subgraph"]  = VtValue(c->GetSubgraph().GetString());
         result["isProfile"] = VtValue(c->IsProfile());
+        result["isDomain"]  = VtValue(c->IsDomain());
     }
     return result;
 }
@@ -787,18 +962,119 @@ _GetTypeImpliedCapabilities(const TfType& type)
     return cache.emplace(type, std::move(result)).first->second;
 }
 
+// Shared implementation: gather impliesCapabilities from plugInfo for a type
+// and all its ancestor types (including the type itself). The plugInfo value
+// is a JSON string array (e.g. ["usd.core.colorspace"]); strengths live on
+// the consumer's claim, not on the implication. Results are cached per TfType
+// in a shared static cache behind cacheMutex.
 /* static */
 std::set<TfToken>
-UsdProfileRegistry::GetSchemaImpliedCapabilities(const TfType& schemaType)
+UsdProfileRegistry::GetTypeImpliedCapabilities(const TfType& type,
+                           UsdProfileRegistry::TypeCapabilityCache* typeCache)
 {
-    return _GetTypeImpliedCapabilities(schemaType);
+    if (type.IsUnknown()) {
+        return {};
+    }
+
+    // Check user-supplied cache if provided
+    if (typeCache) {
+        auto it = typeCache->find(type);
+        if (it != typeCache->end()) {
+            return it->second;
+        }
+    }
+
+    std::set<TfToken> result = _GetTypeImpliedCapabilities(type);
+
+    if (typeCache) {
+        typeCache->emplace(type, result);
+    }
+
+    return result;
 }
 
 /* static */
 std::set<TfToken>
-UsdProfileRegistry::GetFileFormatImpliedCapabilities(const TfType& formatType)
+UsdProfileRegistry::GetPrimImpliedCapabilities(const UsdPrim& prim,
+                     UsdProfileRegistry::PrimCapabilityCache* cache)
 {
-    return _GetTypeImpliedCapabilities(formatType);
+    if (!prim) {
+        return {};
+    }
+
+    std::set<TfToken> implied;
+    TypeCapabilityCache* typeCache = cache? &cache->typeCache : nullptr;
+    std::set<SdfLayerRefPtr> unfilteredLayers;
+    std::set<SdfLayerRefPtr> *layerCache = cache? &cache->layerCache : &unfilteredLayers;
+
+    //---------------------------------------------------------------
+    // Gather capabilities implied by this prim's Applied API Schemas
+    for (const TfToken& schemaToken : prim.GetAppliedSchemas()) {
+        // Drop instance suffix for multi-apply schemas
+        const TfToken typeName =
+            UsdSchemaRegistry::GetTypeNameAndInstance(schemaToken).first;
+        const TfType schemaType =
+            UsdSchemaRegistry::GetTypeFromName(typeName);
+        if (schemaType.IsUnknown()) {
+            continue;
+        }
+
+        std::set<TfToken> schemaCaps =
+            GetTypeImpliedCapabilities(schemaType, typeCache);
+        implied.insert(schemaCaps.begin(), schemaCaps.end());
+    }
+
+    //---------------------------------------------------------------
+    // Gather capabilities from concrete Prim Type plugInfo metadata
+    const TfToken primTypeName = prim.GetTypeName();
+    if (!primTypeName.IsEmpty()) {
+        const TfType primType =
+            UsdSchemaRegistry::GetTypeFromName(primTypeName);
+        if (!primType.IsUnknown()) {
+            std::set<TfToken> typeCaps =
+                GetTypeImpliedCapabilities(primType, typeCache);
+            implied.insert(typeCaps.begin(), typeCaps.end());
+        }
+    }
+
+    //---------------------------------------------------------------
+    // Gather explicitly authored metadata from the prim instance
+    UsdProfilesClaimsAPI claimsApi(prim);
+    VtDictionary authoredUsages = claimsApi.GetCapabilityUsages();
+    for (const auto& entry : authoredUsages) {
+        implied.insert(TfToken(entry.first));
+    }
+
+    //---------------------------------------------------------------
+    // Gather file formats implied by a prim's used layers.
+    // Use the unfiltered list of contributing arcs from
+    // non-inert nodes (ignoring relocates).
+    auto expandedPrimIndex = prim.ComputeExpandedPrimIndex();
+    for (const PcpNodeRef& node: expandedPrimIndex.GetNodeRange()) {
+        if (!node.IsInert() || node.GetArcType() == PcpArcTypeRelocate) {
+            const PcpLayerStackRefPtr& stack = node.GetLayerStack();
+            for (SdfLayerRefPtr const &layer: stack->GetLayers()) {
+                // If there was a layer, check it for file formats.
+                if (layer && !layer->IsAnonymous()) {
+                    if (auto [it, inserted] = layerCache->insert(layer); inserted) {
+                        SdfFileFormatConstPtr fmt = layer->GetFileFormat();
+                        if (fmt) {
+                            TfType formatType = TfType::Find(*fmt);
+                            if (!formatType.IsUnknown()) {
+                                if (auto [it, inserted] = typeCache->insert({formatType, {}}); inserted) {
+                                    std::set<TfToken> fmtCaps =
+                                        UsdProfileRegistry::GetFileFormatImpliedCapabilities(formatType);
+                                    implied.insert(fmtCaps.begin(), fmtCaps.end());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return implied;
 }
 
 /* static */
@@ -856,6 +1132,65 @@ UsdProfileRegistry::GetAllProfiles()
     return instance._capabilityGraph->GetAllProfiles();
 }
 
+/* static */
+std::set<TfToken>
+UsdProfileRegistry::GetAllDomains()
+{
+    UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
+    return instance._capabilityGraph->GetAllDomains();
+}
+
+/* static */
+UsdProfileRegistry::DomainOrderVector
+UsdProfileRegistry::GetDomains(const TfToken& capability)
+{
+    return GetInstance()._capabilityGraph->GetDomains(capability);
+}
+
+/* static */
+UsdProfileRegistry::DomainOrderVector
+UsdProfileRegistry::_GetDomainsUnion(const std::set<TfToken>& domains)
+{
+    std::set<std::pair<int, TfToken>> ordered;
+    for (const TfToken& d : domains) {
+        for (const auto& [domain, order] : GetDomains(d)) {
+            ordered.emplace(order, domain);
+        }
+    }
+    DomainOrderVector result;
+    result.reserve(ordered.size());
+    for (const auto& [order, domain] : ordered) {
+        result.emplace_back(domain, order);
+    }
+    return result;
+}
+
+/* static */
+UsdProfileRegistry::DomainOrderVector
+UsdProfileRegistry::GetPluginDomains(const std::string& pluginName)
+{
+    UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
+    auto it = instance._pluginDomains.find(pluginName);
+    if (it == instance._pluginDomains.end()) {
+        return {};
+    }
+    return _GetDomainsUnion(it->second);
+}
+
+/* static */
+UsdProfileRegistry::DomainOrderVector
+UsdProfileRegistry::GetTypeDomains(const TfType& type)
+{
+    if (type.IsUnknown()) {
+        return {};
+    }
+    PlugPluginPtr plug = PlugRegistry::GetInstance().GetPluginForType(type);
+    if (!plug) {
+        return {};
+    }
+    return GetPluginDomains(plug->GetName());
+}
+
 // Helper function to make reading from dictionaries easier
 static bool
 _GetKey(const JsObject &dict, const std::string &key, JsObject *value)
@@ -881,10 +1216,11 @@ _GetStringFromDict(const JsObject &dict, const std::string &key,
 }
 
 bool
-UsdProfileRegistry::_LoadCapabilitiesFromProfileData(
-    const JsObject& profileData)
+UsdProfileRegistry::MergeProfileData(
+    const JsObject& profileData,
+    std::set<TfToken>* declaredDomains)
 {
-    // --- Merge styles and groups ---
+    // Merge styles and groups
 
     JsObject stylesData;
     if (_GetKey(profileData, _tokens->CapabilityStylesKey, &stylesData)) {
@@ -970,15 +1306,42 @@ UsdProfileRegistry::_LoadCapabilitiesFromProfileData(
             isProfile = isProfileIt->second.GetBool();
         }
 
+        bool isDomain = false;
+        auto isDomainIt = capObj.find(_tokens->IsDomainKey);
+        if (isDomainIt != capObj.end() && isDomainIt->second.IsBool()) {
+            isDomain = isDomainIt->second.GetBool();
+        }
+
         Capability cap(capId, TfToken(displayName), docstring,
-                       isProfile);
+                       isProfile, isDomain);
         cap.SetStyle(style);
         cap.SetSubgraph(subgraph);
 
-        _capabilityGraph->AddCapability(capId, incomingEdges, cap);
+        if (_capabilityGraph->AddCapability(capId, incomingEdges, cap)
+                && isDomain && declaredDomains) {
+            declaredDomains->insert(capId);
+        }
     }
 
     return true;
+}
+
+// Sanity check: every declared domain should be a domain node in the graph.
+// Domains are tagged on the node itself, so this should never fire.
+void
+UsdProfileRegistry::_ValidatePluginDomains(
+    std::vector<std::string>* errors) const
+{
+    for (const auto& [pluginName, domains] : _pluginDomains) {
+        for (const TfToken& d : domains) {
+            if (!_capabilityGraph->IsDomain(d)) {
+                errors->push_back(TfStringPrintf(
+                    "Plugin '%s' declares domain '%s', which is not a "
+                    "domain in the capability graph",
+                    pluginName.c_str(), d.GetText()));
+            }
+        }
+    }
 }
 
 void
@@ -1001,7 +1364,12 @@ UsdProfileRegistry::_RegisterFromPlugins()
         }
 
         TfDiagnosticTrap trap;
-        _LoadCapabilitiesFromProfileData(profileData);
+        std::set<TfToken> declaredDomains;
+        MergeProfileData(profileData, &declaredDomains);
+        if (!declaredDomains.empty()) {
+            _pluginDomains[plug->GetName()].insert(
+                declaredDomains.begin(), declaredDomains.end());
+        }
 
         if (!trap.IsClean()) {
             std::vector<std::string> msgs;
@@ -1024,6 +1392,7 @@ UsdProfileRegistry::_RegisterFromPlugins()
     _capabilityGraph->ValidateEdges(&errors);
     _capabilityGraph->ValidateAcyclic(&errors);
     _capabilityGraph->ValidateRoot(&errors);
+    _ValidatePluginDomains(&errors);
 
     for (const std::string& err : errors) {
         TF_WARN("%s", err.c_str());
@@ -1036,105 +1405,114 @@ public:
         UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
         instance._capabilityGraph->Clear();
         instance._capabilityStyles.clear();
+        instance._pluginDomains.clear();
     }
 
     static bool LoadFromFile(const std::string& filePath,
                              std::vector<std::string>* errors) {
-    // Open and parse the JSON file
-    std::ifstream ifs(filePath);
-    if (!ifs.is_open()) {
-        if (errors) {
-            errors->push_back(
-                TfStringPrintf("Failed to open file: %s", filePath.c_str()));
+        // Open and parse the JSON file
+        std::ifstream ifs(filePath);
+        if (!ifs.is_open()) {
+            if (errors) {
+                errors->push_back(
+                    TfStringPrintf("Failed to open file: %s", filePath.c_str()));
+            }
+            return false;
         }
-        return false;
-    }
 
-    JsParseError parseError;
-    JsValue root = JsParseStream(ifs, &parseError);
-    if (root.IsNull()) {
-        if (errors) {
-            errors->push_back(
-                TfStringPrintf("JSON parse error in '%s' at line %d col %d: %s",
-                    filePath.c_str(),
-                    parseError.line, parseError.column,
-                    parseError.reason.c_str()));
+        JsParseError parseError;
+        JsValue root = JsParseStream(ifs, &parseError);
+        if (root.IsNull()) {
+            if (errors) {
+                errors->push_back(
+                    TfStringPrintf("JSON parse error in '%s' at line %d col %d: %s",
+                        filePath.c_str(),
+                        parseError.line, parseError.column,
+                        parseError.reason.c_str()));
+            }
+            return false;
         }
-        return false;
-    }
 
-    if (!root.IsObject()) {
-        if (errors) {
-            errors->push_back(
-                TfStringPrintf("Expected JSON object at root of '%s'",
+        if (!root.IsObject()) {
+            if (errors) {
+                errors->push_back(
+                    TfStringPrintf("Expected JSON object at root of '%s'",
+                        filePath.c_str()));
+            }
+            return false;
+        }
+
+        const JsObject& rootObj = root.GetJsObject();
+
+        // Clear existing state
+        Clear();
+
+        // Unwrap canonical plugInfo.json format:
+        //   { "Plugins": [{ "Info": { "Profiles": {...} }, ... }, ...] }
+        // Iterate each plugin entry, extract its Info dict, and look for Profiles.
+        UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
+
+        auto pluginsIt = rootObj.find("Plugins");
+        if (pluginsIt == rootObj.end() || !pluginsIt->second.IsArray()) {
+            if (errors) {
+                errors->push_back(TfStringPrintf(
+                    "Expected 'Plugins' array at root of '%s'",
                     filePath.c_str()));
+            }
+            return false;
         }
-        return false;
-    }
 
-    const JsObject& rootObj = root.GetJsObject();
+        const JsArray& plugins = pluginsIt->second.GetJsArray();
+        for (const JsValue& pluginValue : plugins) {
+            if (!pluginValue.IsObject()) {
+                continue;
+            }
+            const JsObject& pluginObj = pluginValue.GetJsObject();
 
-    // Clear existing state
-    Clear();
+            // Extract "Info" dict (same level as GetMetadata() returns)
+            JsObject infoDict;
+            if (!_GetKey(pluginObj, "Info", &infoDict)) {
+                continue;
+            }
 
-    // Unwrap canonical plugInfo.json format:
-    //   { "Plugins": [{ "Info": { "Profiles": {...} }, ... }, ...] }
-    // Iterate each plugin entry, extract its Info dict, and look for Profiles.
-    UsdProfileRegistry& instance = UsdProfileRegistry::GetInstance();
+            // Look for "Profiles" inside Info
+            JsObject profileData;
+            if (!_GetKey(infoDict, _tokens->PluginProfilesKey, &profileData)) {
+                continue;
+            }
 
-    auto pluginsIt = rootObj.find("Plugins");
-    if (pluginsIt == rootObj.end() || !pluginsIt->second.IsArray()) {
+            std::set<TfToken> declaredDomains;
+            instance.MergeProfileData(profileData, &declaredDomains);
+            if (!declaredDomains.empty()) {
+                const std::string pluginName =
+                    _GetStringFromDict(pluginObj, "Name");
+                instance._pluginDomains[pluginName].insert(
+                    declaredDomains.begin(), declaredDomains.end());
+            }
+        }
+
+        // Validate the graph
+        bool valid = true;
+
+        std::vector<std::string> validationErrors;
+        if (!instance._capabilityGraph->ValidateEdges(&validationErrors)) {
+            valid = false;
+        }
+        if (!instance._capabilityGraph->ValidateAcyclic(&validationErrors)) {
+            valid = false;
+        }
+        if (!instance._capabilityGraph->ValidateRoot(&validationErrors)) {
+            valid = false;
+        }
+        instance._ValidatePluginDomains(&validationErrors);
+
         if (errors) {
-            errors->push_back(TfStringPrintf(
-                "Expected 'Plugins' array at root of '%s'",
-                filePath.c_str()));
-        }
-        return false;
-    }
-
-    const JsArray& plugins = pluginsIt->second.GetJsArray();
-    for (const JsValue& pluginValue : plugins) {
-        if (!pluginValue.IsObject()) {
-            continue;
-        }
-        const JsObject& pluginObj = pluginValue.GetJsObject();
-
-        // Extract "Info" dict (same level as GetMetadata() returns)
-        JsObject infoDict;
-        if (!_GetKey(pluginObj, "Info", &infoDict)) {
-            continue;
+            errors->insert(errors->end(),
+                validationErrors.begin(), validationErrors.end());
         }
 
-        // Look for "Profiles" inside Info
-        JsObject profileData;
-        if (!_GetKey(infoDict, _tokens->PluginProfilesKey, &profileData)) {
-            continue;
-        }
-
-        instance._LoadCapabilitiesFromProfileData(profileData);
+        return valid;
     }
-
-    // Validate the graph
-    bool valid = true;
-
-    std::vector<std::string> validationErrors;
-    if (!instance._capabilityGraph->ValidateEdges(&validationErrors)) {
-        valid = false;
-    }
-    if (!instance._capabilityGraph->ValidateAcyclic(&validationErrors)) {
-        valid = false;
-    }
-    if (!instance._capabilityGraph->ValidateRoot(&validationErrors)) {
-        valid = false;
-    }
-
-    if (errors) {
-        errors->insert(errors->end(),
-            validationErrors.begin(), validationErrors.end());
-    }
-
-    return valid;
-}
 };
 
 USDPROFILES_API void

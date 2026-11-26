@@ -5,6 +5,29 @@
     "Plugins": [
         {
             "Info": {
+                "Profiles": {
+                    "Capabilities": {
+                        "usd.geom": {
+                            "docstring": "Capabilities introduced by the pxr/usd/usdGeom library.", 
+                            "isDomain": true, 
+                            "name": "usdGeom library", 
+                            "predecessors": [
+                                "usd.core"
+                            ], 
+                            "style": "core", 
+                            "subgraph": "Foundation"
+                        }, 
+                        "usd.geom.pointInstancer": {
+                            "docstring": "Vectorized instancing of prototypes via UsdGeomPointInstancer.", 
+                            "name": "Point Instancer", 
+                            "predecessors": [
+                                "usd.geom"
+                            ], 
+                            "style": "core", 
+                            "subgraph": "Foundation"
+                        }
+                    }
+                }, 
                 "SdfMetadata": {
                     "constraintTargetIdentifier": {
                         "appliesTo": [
@@ -65,6 +88,13 @@
                     }
                 }, 
                 "Types": {
+                    "UsdGeom": {
+                        "profiles": {
+                            "impliedCapabilities": {
+                                "usd.geom" : [ "usd" ]
+                            }
+                        }
+                    }, 
                     "UsdGeomBackPlateAPI": {
                         "alias": {
                             "UsdSchemaBase": "BackPlateAPI"
@@ -314,8 +344,16 @@
                             "UsdGeomBoundable"
                         ], 
                         "implementsComputeExtent": true, 
+                        "impliesCapabilities": [
+                            "usd.geom.pointInstancer"
+                        ], 
                         "schemaIdentifier": "PointInstancer", 
-                        "schemaKind": "concreteTyped"
+                        "schemaKind": "concreteTyped",
+                        "profiles": {
+                            "impliedCapabilities": {
+                                "usd.geom.pointInstancer" : [ "usd.geom" ]
+                            }
+                        }
                     }, 
                     "UsdGeomPoints": {
                         "alias": {

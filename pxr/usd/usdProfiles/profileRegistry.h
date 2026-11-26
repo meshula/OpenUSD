@@ -10,6 +10,7 @@
 /// \file usdProfiles/profileRegistry.h
 
 #include "pxr/usd/usdProfiles/api.h"
+#include "pxr/usd/usd/prim.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/tf/weakBase.h"
 #include "pxr/base/tf/singleton.h"
@@ -19,9 +20,11 @@
 #include "pxr/base/js/types.h"
 
 #include <memory>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -63,6 +66,14 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
         CycleFound,
     };
 
+    /// Shared helper: parse Capabilities, CapabilityStyles, and
+    /// Subgraphs from a "Profiles" JsObject into the graph.
+    /// If \p declaredDomains is non-null, it receives the capabilities in
+    /// \p profileData that are tagged with \c "isDomain": true.
+    USDPROFILES_API bool MergeProfileData(
+        const JsObject& profileData,
+        std::set<TfToken>* declaredDomains = nullptr);
+
     /// Test whether \p capability is known to the registry.
     USDPROFILES_API static bool HasCapability(const TfToken& capability);
 
@@ -72,12 +83,19 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
     /// \sa HasCapability
     USDPROFILES_API static bool IsProfile(const TfToken& capability);
 
+    /// Return true if \p capability is tagged as a domain node
+    /// (i.e., declared with \c "isDomain": true in plugInfo.json).
+    /// Returns false for unknown capabilities.
+    /// \sa HasCapability
+    USDPROFILES_API static bool IsDomain(const TfToken& capability);
+
     /// Return metadata associated with \p capability as a \c VtDictionary with
-    /// keys \c name, \c docstring, \c style, and \c subgraph.
+    /// keys \c name, \c docstring, \c style, \c subgraph, \c isProfile,
+    /// and \c isDomain.
     /// Returns an empty dictionary if the capability is unknown.
     /// \sa HasCapability
-    USDPROFILES_API
-    static VtDictionary GetCapabilityMetadata(const TfToken& capability);
+    USDPROFILES_API static
+    VtDictionary GetCapabilityMetadata(const TfToken& capability);
 
     /// Per-capability query result.
     /// Ordered by capability token only; status is payload, not identity.
@@ -147,9 +165,15 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
     /// \p excepted is an optional caller-supplied set of capabilities to
     /// exclude from coverage. A required capability whose resolved token
     /// appears in \p excepted is reported with status \c Excepted rather than
-    /// its DAG-derived status, and is treated as \c NoPath for the aggregate.
-    /// This allows callers to express "profile X is satisfied under these
-    /// known exclusions" without modifying the registry.
+    /// its DAG-derived status.
+    ///
+    /// By default an \c Excepted capability is treated as \c NoPath for the
+    /// aggregate: an exception records that a capability is unsupported, it
+    /// does not excuse it. If \p allowExceptions is true, \c Excepted
+    /// capabilities are excused instead, and a query that passes only because
+    /// of them returns \c Excepted. This allows callers to express "profile X
+    /// is satisfied under these known exclusions" without modifying the
+    /// registry.
     ///
     /// The aggregate \c QueryStatus precedence is:
     /// \c NoPath > \c DeprecationConflict > \c Excepted > \c Deprecated > \c ValidPath.
@@ -163,41 +187,94 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
     /// Returns \c NoPath (with an empty \p results) if \p perspective is
     /// unknown after resolution, or if \p required is empty.
     /// \sa HasCapability
-    USDPROFILES_API static QueryStatus CoversCapabilities(
-                                    const TfToken& perspective,
-                                    const std::set<TfToken>& required,
-                                    const std::set<TfToken>& excepted = {},
-                                    std::set<CapabilityResult>* results = nullptr);
+    USDPROFILES_API static
+    QueryStatus CoversCapabilities(
+                    const TfToken& perspective,
+                    const std::set<TfToken>& required,
+                    const std::set<TfToken>& excepted = {},
+                    std::set<CapabilityResult>* results = nullptr,
+                    bool allowExceptions = false);
+
+    /// Return whether the capabilities in \p provided satisfy everything
+    /// \p target requires, and with what deprecation status.
+    ///
+    /// This is the converse of \c CoversCapabilities. \c CoversCapabilities
+    /// asks "does \p perspective support everything in \p required?" (a
+    /// consumer-side question: can this runtime handle this asset?).
+    /// \c SatisfiesCapabilities asks "does \p provided include everything
+    /// \p target depends on?" (a producer-side question: does this asset
+    /// have every prerequisite for this capability or profile?).
+    ///
+    /// The requirements of \p target are its full transitive predecessor set
+    /// (see \c GetTransitivePredecessors), plus \p target itself unless it is
+    /// a profile. Profiles are bundles of requirements, not something an
+    /// asset provides directly.
+    ///
+    /// \p target and each token in \p provided are resolved via
+    /// \c ResolveCapability before comparison.
+    ///
+    /// If \p results is non-null it is populated with one entry per
+    /// requirement. Requirements found in \p provided carry the status of the
+    /// best path from \p target to them (\c ValidPath, \c Deprecated, or
+    /// \c DeprecationConflict); \p target itself is reported as \c ValidPath.
+    /// Requirements missing from \p provided are reported as \c NoPath.
+    ///
+    /// The aggregate follows the same precedence as \c CoversCapabilities:
+    /// \c NoPath > \c DeprecationConflict > \c Deprecated > \c ValidPath.
+    ///
+    /// Returns \c NoPath (with an empty \p results) if \p target is unknown
+    /// after resolution.
+    /// \sa CoversCapabilities, HasCapability
+    USDPROFILES_API static
+    QueryStatus SatisfiesCapabilities(
+                    const TfToken& target,
+                    const std::set<TfToken>& provided,
+                    std::set<CapabilityResult>* results = nullptr);
+
+    // When traversing scene subtrees with many prims, a cache is necessary
+    // to eliminate redundant data checks.
+    using TypeCapabilityCache =
+        std::unordered_map<TfType, std::set<TfToken>, TfHash>;
 
     /// Return the union of \c impliesCapabilities declared on \p schemaType
-    /// and all of its ancestor types, as a set of capability tokens.
+    /// and all of its ancestor types as a set of capability tokens.
     ///
-    /// Implications carry only the capability identity; the application's
-    /// usage strength (\c hard / \c soft / \c enhancement) is recorded by
-    /// the consumer on its \c UsdProfilesClaimsAPI, not at the schema
-    /// declaration site.
+    /// Implications carry the capability identity. Usage strength should
+    /// be (\c hard / \c soft / \c enhancement) should be recorded in claims
+    /// authored via \c UsdProfilesClaimsAPI.
     ///
-    /// Returns an empty set if \p schemaType is unknown or no ancestor
+    /// If \p typeCache is non-null, it is checked first and populated
+    /// on misses.
+    ///
+    /// Returns an empty set if the \p type is unknown or no ancestor
     /// declares any implied capabilities.
     ///
     /// Results are cached on first call per \c TfType.
-    USDPROFILES_API
-    static std::set<TfToken>
-    GetSchemaImpliedCapabilities(const TfType& schemaType);
+    USDPROFILES_API static
+    std::set<TfToken> GetTypeImpliedCapabilities(const TfType& type,
+                               TypeCapabilityCache* typeCache = nullptr);
 
-    /// Return the union of \c impliesCapabilities declared on \p formatType
-    /// and all of its ancestor types, using the same rules as
-    /// \c GetSchemaImpliedCapabilities. Intended for \c SdfFileFormat-derived
-    /// types: obtain the \c TfType via \c TfType::Find(*fileFormatPtr) or
-    /// \c TfType::FindByName.
-    ///
-    /// Returns an empty set if \p formatType is unknown or no ancestor
-    /// declares any implied capabilities.
-    ///
-    /// Results are cached on first call per \c TfType.
-    USDPROFILES_API
-    static std::set<TfToken>
-    GetFileFormatImpliedCapabilities(const TfType& formatType);
+    /// Deprecated
+    USDPROFILES_API static
+    std::set<TfToken> GetSchemaImpliedCapabilities(const TfType& schemaType,
+                                 TypeCapabilityCache* typeCache = nullptr) {
+        return GetTypeImpliedCapabilities(schemaType, typeCache);
+    }
+
+    /// Deprecated
+    USDPROFILES_API static
+    std::set<TfToken> GetFileFormatImpliedCapabilities(const TfType& formatType,
+                                     TypeCapabilityCache* typeCache = nullptr) {
+        return GetTypeImpliedCapabilities(formatType, typeCache);
+    }
+
+    struct PrimCapabilityCache {
+        TypeCapabilityCache typeCache;
+        std::set<SdfLayerRefPtr> layerCache;
+    };
+    USDPROFILES_API static
+    std::set<TfToken> GetPrimImpliedCapabilities(const UsdPrim& prim,
+                               PrimCapabilityCache* typeCache = nullptr);
 
     /// Return the set of all capabilities known to the registry.
     USDPROFILES_API static std::set<TfToken> GetAllCapabilities();
@@ -206,8 +283,50 @@ class UsdProfileRegistry : public TfSingleton<UsdProfileRegistry>
     /// capabilities declared with \c "isProfile": true in plugInfo.json.
     USDPROFILES_API static std::set<TfToken> GetAllProfiles();
 
+    /// Return the set of all domains known to the registry. Domains are
+    /// capabilities declared with \c "isDomain": true in plugInfo.json.
+    USDPROFILES_API static std::set<TfToken> GetAllDomains();
+
+    /// A list of (domain, order) pairs, sorted by order and then by token.
+    ///
+    /// A domain's order is the length of the longest chain of domain nodes
+    /// from a root of the capability DAG to that domain, minus one.
+    /// Non-domain nodes on the chain do not count. A root domain such as
+    /// \c usd has order 0; \c usd.geom, whose nearest domain ancestor is
+    /// \c usd, has order 1.
+    using DomainOrderVector = std::vector<std::pair<TfToken, int>>;
+
+    /// Return the domains among \p capability and its transitive
+    /// predecessors, each with its order. Deprecated edges are followed.
+    /// Returns an empty vector if \p capability is unknown or no domain is
+    /// reached.
+    /// \sa GetTransitivePredecessors
+    USDPROFILES_API static
+    DomainOrderVector GetDomains(const TfToken& capability);
+
+    /// Return the domains declared by the plugin that defines \p type, plus
+    /// their domain ancestors, each with its order.
+    ///
+    /// Only the plugin's declared domains contribute; capabilities implied
+    /// by the type via \c impliesCapabilities do not.
+    ///
+    /// Returns an empty vector if \p type is unknown, has no plugin, or its
+    /// plugin declares no domain.
+    /// \sa GetPluginDomains
+    USDPROFILES_API static
+    DomainOrderVector GetTypeDomains(const TfType& type);
+
+    /// Return the domains declared by the plugin named \p pluginName, plus
+    /// their domain ancestors, each with its order.
+    /// Returns an empty vector if the plugin is unknown or declares no
+    /// domain.
+    /// \sa GetTypeDomains
+    USDPROFILES_API static
+    DomainOrderVector GetPluginDomains(const std::string& pluginName);
+
     /// Extract just the capability tokens from a \c CapabilityResult set,
     /// discarding the per-entry status.
+    USDPROFILES_API
     static std::set<TfToken>
     CapabilityResultsToTokens(const std::set<CapabilityResult>& results) {
         std::set<TfToken> tokens;
@@ -242,22 +361,26 @@ private:
 
     UsdProfileRegistry();
     ~UsdProfileRegistry();
-    
+
     /// Return the single \c UsdProfileRegistry instance.
     static UsdProfileRegistry& GetInstance();
 
     void _RegisterFromPlugins();
 
-    /// Shared helper: parse Capabilities, CapabilityStyles, and
-    /// Subgraphs from a "Profiles" JsObject into the graph.
-    /// Called by both _RegisterFromPlugins and _TestLoadFromFile.
-    bool _LoadCapabilitiesFromProfileData(const JsObject& profileData);
-    
+    // Warn about declared plugin domains that are not domains in the graph.
+    void _ValidatePluginDomains(std::vector<std::string>* errors) const;
+
+    // Union of GetDomains over \p domains, deduplicated and sorted.
+    static DomainOrderVector _GetDomainsUnion(const std::set<TfToken>& domains);
+
     class _CapabilityGraph;
     std::unique_ptr<_CapabilityGraph> _capabilityGraph;
 
     // Store styles and groups defined in plugins
     std::map<TfToken, std::string> _capabilityStyles;
+
+    // Domains declared by each plugin, keyed by plugin name.
+    std::map<std::string, std::set<TfToken>> _pluginDomains;
 };
 
 USDPROFILES_API_TEMPLATE_CLASS(TfSingleton<UsdProfileRegistry>);
